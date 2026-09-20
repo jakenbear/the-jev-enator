@@ -17,7 +17,7 @@
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-2ea44f">
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
-  <img alt="tests 57/57" src="https://img.shields.io/badge/fixtures-57%2F57-2ea44f">
+  <img alt="tests 58/58" src="https://img.shields.io/badge/fixtures-58%2F58-2ea44f">
   <img alt="CI" src="https://github.com/jakenbear/the-jev-enator/actions/workflows/test.yml/badge.svg">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
@@ -79,11 +79,16 @@ Honest status, so you can decide whether to trust it:
   found and fixed so far (`--force-with-lease`). Tuned against a few hundred
   classifications, nearly all from one developer's machine. Expect to hit a false
   positive specific to your stack and to fix it in about five minutes.
-- **Failure notice** — 19/19 fixtures with a wide margin on the main question
+- **Failure notice** — 20/20 fixtures with a wide margin on the main question
   (clean output ≤0.27, failures ≥0.95). Enforcing, because it only ever injects a
   sentence; the worst case is a wasted paragraph, not a blocked turn. The
   failure-kind hints are newer and unproven on real traffic — 99 logged calls so
   far contained no transient failures at all, so that path is fixture-tested only.
+  The kind classifier is a single `choice` question as of #8; the margin threshold
+  that governs when it declines to name a recovery is set from 18 fixture
+  distributions, which is enough to place it in a real gap and not enough to call
+  it calibrated. `./report.sh` prints the kind counts and near-ties to re-check it
+  against your own traffic.
 - **Completion check** — unproven, which is why it ships log-only. Its fixtures
   were written by the same author as the questions they test, so they demonstrate
   the plumbing and nothing about real-world accuracy.
@@ -501,13 +506,25 @@ project.
 
 ## 🧠 How it decides
 
-Both hooks work the same way: a set of noul (yes/no) questions, all evaluated in
-parallel in a single request, each with its own threshold. Extra questions cost
-only their own tokens and barely affect latency.
+Both hooks work the same way: a set of questions, all evaluated in parallel in a
+single request, each with its own threshold. Extra questions cost only their own
+tokens and barely affect latency.
 
-Each question carries explicit `criteria` for what true and false look like.
-Those examples do most of the work — vague instructions produce probabilities
-near 0.5, which are useless for thresholds.
+Most are `noul` — a single calibrated probability that something is true. One is a
+`choice`, which returns a probability distribution over labeled options instead.
+The rule for picking: use `choice` when the options are mutually exclusive and you
+need to know *which* one, because three independent yes/no answers cannot be
+compared to each other. Asking them separately means inventing a tiebreak rule,
+and a hardcoded one lets a barely-there 0.61 beat a near-certain 0.94.
+
+Each question carries explicit `criteria` — for `noul`, what true and false look
+like; for `choice`, what each option looks like. Those examples do most of the
+work; vague instructions produce probabilities near 0.5, which are useless for
+thresholds.
+
+A `choice` wants an explicit "none of the above" option. The probability mass has
+to land somewhere, so without one, an ordinary test failure gets forced into
+looking like a bad command.
 
 ### 🛡️ Danger gate — `src/jev_gate.py`
 
@@ -536,11 +553,11 @@ allowed, so `test_jev_gate.py` asserts the two agree.
 
 | Question | acts at |
 | --- | --- |
-| `output_shows_failure` | 0.85 — inject a plain reminder |
-| `exit_status_misleads` | 0.45 — upgrade to the stronger wording |
-| `failure_is_missing_dependency` | 0.60 — name the recovery |
-| `failure_is_transient` | 0.60 — name the recovery |
-| `failure_is_wrong_invocation` | 0.60 — name the recovery |
+| Question | type | acts at |
+| --- | --- | --- |
+| `output_shows_failure` | noul | 0.85 — inject a plain reminder |
+| `exit_status_misleads` | noul | 0.45 — upgrade to the stronger wording |
+| `failure_kind` | choice | 0.45 **and** 0.20 clear of second — name the recovery |
 
 Fixture margins are wide on the first question: clean output scores ≤0.27, real
 failures ≥0.95. `exit_status_misleads` is the tight one — an ordinary visible test
@@ -548,10 +565,25 @@ failure lands at 0.44 against a 0.45 bar, so that fixture is asserted as a plain
 notice, not an emphatic one. Don't lower the threshold to move it; you'd make
 every test failure emphatic and the wording would stop meaning anything.
 
-The three kind questions are checked in the order above and the first over 0.60
-wins, because a missing module often also reads as a bad path. Their bar is lower
-than 0.85 on purpose: a failure is already established by then, so the only
-question is which recovery to name.
+`failure_kind` is one `choice` over `transient | missing_dependency |
+wrong_invocation | needs_code_change`. `needs_code_change` names no recovery on
+purpose — "read the output and fix the code" is what the agent was going to do
+anyway.
+
+Both bars matter, and the low one is deliberate. With four options, any top score
+over 0.50 already forces second place under 0.50, so a bar of 0.60 makes the
+margin check unreachable — verified by deleting it and watching every fixture still
+pass. So the bar is 0.45 and the margin does the real work. A Docker daemon that is
+down reads equally as a missing dependency (0.49) or a transient outage (0.42); the
+notice fires with no recovery named, which is right, because a human could not call
+that one either. That case is a fixture, so the margin cannot quietly become dead
+code again.
+
+Measured cost of one `choice` versus the three `noul` questions it replaced: 4%
+fewer input tokens per call, not the ~40% a question count suggests. Jev prices per
+input token and the command output dominates the state, so the four option
+descriptions cost nearly what the three true/false pairs did. The win is the
+tiebreak being real, not the price.
 
 Command output is the largest state in this repo, so it keeps the first and last
 4,000 characters — compile errors live at the head, test summaries at the tail,
@@ -583,7 +615,7 @@ Edit the thresholds or `QUESTIONS` criteria, then run the matching fixtures:
 ```bash
 source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
-python3 tests/test_jev_notice.py   # 19 cases: 6 quiet, 13 failures
+python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 ```
 

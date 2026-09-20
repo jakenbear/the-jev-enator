@@ -117,8 +117,14 @@ def cassette_key(state: str, questions: dict) -> str:
     their instruction text: rewording a question should not silently invalidate
     every recording, since the whole point of a live run is to catch the score
     change that rewording causes.
+
+    The type is part of the key. Without it, changing a question from noul to
+    choice under the same name keeps the old key, so replay serves a float where
+    the caller now expects a distribution -- a stale recording passing as fresh,
+    which is the one failure a cassette must never have.
     """
-    payload = state + "\x00" + ",".join(sorted(questions))
+    shape = ",".join(f"{name}:{questions[name].get('type', 'noul')}" for name in sorted(questions))
+    payload = state + "\x00" + shape
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -136,11 +142,54 @@ def _load_cassette(path: str) -> dict:
         raise SystemExit(f"jev replay: cannot read {path}: {exc}")
 
 
+def parse_answers(answers: dict) -> dict:
+    """Flatten an API answers block to name -> score.
+
+    A `noul` answer is a single probability, so its score is a float. A `choice`
+    answer is a distribution over labels, so its score is a dict of
+    label -> probability. Callers that only ask noul questions see no difference.
+
+    Keeping the full distribution rather than just the winning label is the whole
+    reason to use choice: the margin between first and second place is the signal
+    that three independent binaries threw away.
+    """
+    scores = {}
+    for name, answer in answers.items():
+        if not isinstance(answer, dict):
+            continue
+        if answer.get("type") == "choice" or "probabilities" in answer:
+            probs = answer.get("probabilities") or {}
+            # An empty distribution is not a zero-confidence answer, it is a
+            # response we cannot read. Skip it so the caller's "did I get an
+            # answer" check fails rather than silently seeing no options.
+            if probs:
+                scores[name] = {k: float(v) for k, v in probs.items()}
+        else:
+            scores[name] = answer.get("noul", 0.0)
+    return scores
+
+
+def top_two(dist: dict) -> tuple[str, float, float]:
+    """Return (winning label, its probability, runner-up probability).
+
+    Returns ("", 0.0, 0.0) for an empty distribution. The runner-up is 0.0 when
+    there is only one option, which makes the margin the winner's own probability
+    -- correct, since a single-option choice has nothing to be confused with.
+    """
+    if not dist:
+        return "", 0.0, 0.0
+    ranked = sorted(dist.items(), key=lambda kv: kv[1], reverse=True)
+    label, top = ranked[0]
+    second = ranked[1][1] if len(ranked) > 1 else 0.0
+    return label, float(top), float(second)
+
+
 def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
     """Return (scores, latency_ms, usage).
 
-    scores maps question name -> probability. Raises JevError on any failure so
-    the caller can fail open.
+    scores maps question name -> probability (noul) or to a dict of
+    label -> probability (choice). Raises JevError on any failure so the caller
+    can fail open.
     """
     # Replay mode: serve a recorded response instead of calling the API, so the
     # suites run offline, deterministically, and without a key. A miss exits
@@ -186,8 +235,7 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
         raise JevError(str(exc)) from exc
 
     elapsed_ms = round((time.monotonic() - started) * 1000)
-    answers = result.get("answers", {})
-    scores = {k: v.get("noul", 0.0) for k, v in answers.items()}
+    scores = parse_answers(result.get("answers", {}))
     if not scores:
         raise JevError("no answers in response")
 

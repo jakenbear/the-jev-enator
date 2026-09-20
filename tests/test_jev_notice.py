@@ -34,6 +34,10 @@ from fixture_env import fixture_log, hook_env, replay_miss, report, require_key,
 #           "emphatic"  -> must inject the stronger easy-to-miss wording
 # kind (optional): substring the recovery hint must contain, or None to require
 #           that no recovery is named. Omit to not check the hint at all.
+#
+# The kind fixtures are asserted on the injected hint text, not on the winning
+# label, and that is deliberate: it is what the agent actually reads. It also
+# meant the noul -> choice migration could be checked against these unchanged.
 CASES = [
     # --- must stay quiet: ordinary success ---
     (
@@ -183,15 +187,32 @@ CASES = [
         "npm error Unknown option: '--coverage-all'\nnpm error\nnpm error To see a list of supported npm commands, run:\nnpm error   npm help",
         "command itself looks wrong",
     ),
-    # A plain assertion failure fits none of the three kinds. Naming a recovery
-    # here would be worse than silence: it is exactly the case where the agent
-    # does need to read the diff and think.
+    # A plain assertion failure is needs_code_change, which maps to no hint. It is
+    # the case where the agent does need to read the diff and think, and there is
+    # no shortcut worth naming.
     (
         "kind none: real assertion failure gets no hint",
         "notice",
         "npm test -- date.spec.ts",
         1,
         "FAIL src/utils/date.spec.ts\n  formats as en-CA\n\n    expected: '2026-01-02'\n    received: '1/2/2026'\n\nTests: 1 failed, 3 passed, 4 total",
+        None,
+    ),
+    # The fixture that pins KIND_MARGIN. Everything above is classified with near
+    # total confidence, so the margin check was unreachable and deleting it left
+    # all 19 cases passing -- an untested threshold.
+    #
+    # A dead Docker daemon is a genuine tie: missing_dependency 0.49 against
+    # transient 0.42, because it is honestly both. Docker may not be installed, or
+    # it may simply not be up yet. Naming either recovery would send the agent
+    # confidently in a direction that is a coin flip, so the notice fires without a
+    # hint. If this case ever starts naming a recovery, the margin check is gone.
+    (
+        "kind none: honest tie between two kinds stays hintless",
+        "notice",
+        "docker compose up -d",
+        1,
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
         None,
     ),
 ]

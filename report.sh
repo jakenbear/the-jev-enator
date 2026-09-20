@@ -108,6 +108,11 @@ GATE_THRESH = {
 def gate_outcome(scores):
     worst = "allow"
     for name, prob in scores.items():
+        # A choice answer logs a dict of label -> probability. The gate asks only
+        # noul questions, but skip defensively so one mixed record cannot crash
+        # a report over a whole log.
+        if not isinstance(prob, (int, float)):
+            continue
         deny_at, ask_at = GATE_THRESH.get(name, (0.90, 0.60))
         if prob >= deny_at:
             return "deny"
@@ -165,6 +170,8 @@ else:
     reasons = Counter()
     for r in gate:
         for name, prob in r["scores"].items():
+            if not isinstance(prob, (int, float)):
+                continue
             deny_at, ask_at = GATE_THRESH.get(name, (0.90, 0.60))
             if prob >= min(deny_at, ask_at):
                 reasons[name] += 1
@@ -196,6 +203,24 @@ else:
         print("\n  Failures an agent would plausibly have skimmed past:")
         for r in emph[-5:]:
             print(f"    {r.get('command','')[:70]}")
+
+    # Which recovery got named, and how often the classifier was too unsure to
+    # name one. A large "too close to call" count means KIND_MARGIN is too strict;
+    # recoveries that turn out wrong in practice mean it is too loose.
+    kinds = Counter(r["kind"] for r in spoke if r.get("kind"))
+    unsure = [
+        r for r in spoke
+        if not r.get("kind") and r.get("kind_margin") is not None
+    ]
+    if kinds or unsure:
+        print("\n  Recovery named for each failure kind:")
+        for name, n in kinds.most_common():
+            print(f"    {name:24} {n}")
+        if unsure:
+            near = [r for r in unsure if r.get("kind_p", 0) >= 0.60]
+            print(f"    {'(none -- too close)':24} {len(unsure)}"
+                  f"{f', {len(near)} of them a near-tie' if near else ''}")
+
     lat = sorted(r["latency_ms"] for r in notice)
     print(f"\n  median {lat[len(lat)//2]}ms")
     print("\n  'easy to miss' is the number that justifies this hook. A failure")

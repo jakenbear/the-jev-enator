@@ -43,7 +43,7 @@ With a key, against the live API:
 ```bash
 source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
-python3 tests/test_jev_notice.py   # 19 cases: 6 quiet, 13 failures
+python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 ```
 
