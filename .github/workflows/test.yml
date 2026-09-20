@@ -74,6 +74,12 @@ jobs:
         # edits a file we do not own, and the only check that Linux is exercised
         # at all -- issue #4.
         run: python3 tests/test_install.py
+      - name: Log loading and redaction
+        # No key, no network, no real log -- fixtures only. The redaction cases
+        # are the reason this is in CI: the failure mode is a credential in a
+        # file somebody just sent to their team, and nothing about the output
+        # looks wrong.
+        run: python3 tests/test_jev_logs.py
 
   version-guard:
     # The hooks must refuse to run on an interpreter that cannot import them,

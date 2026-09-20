@@ -13,7 +13,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 8 OKs
+./verify.sh                   # should print 12 OKs
 ```
 
 Python 3.10+, standard library only. No build step, no dependencies, no
@@ -45,11 +45,12 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
-python3 tests/test_install.py      # 28 assertions on install.sh; no key needed
+python3 tests/test_install.py      # 53 assertions on install.sh; no key needed
+python3 tests/test_jev_logs.py     # 63 assertions on log merging and redaction
 ```
 
 These cost a fraction of a cent and take about a minute.
-Run all three before opening a PR — the thresholds interact, and it's easy to fix
+Run all of them before opening a PR — the thresholds interact, and it's easy to fix
 one case by breaking another.
 
 Each suite logs its classifications to its own temp file and prints the path when
@@ -73,8 +74,23 @@ This is the highest-value issue you can file. Include:
 That last one matters most: it has the actual probabilities, so the fix is
 usually obvious from the scores alone.
 
-Redact freely. The log records command text and paths, so scrub anything
-internal before pasting.
+**Don't paste a raw log line.** It carries your working directory, the full
+command text, and a 300-character excerpt of whatever was being classified. Run
+it through the scrubber instead:
+
+```bash
+./redact.sh --keep-commands -o bad-call.jsonl    # then grep out the line you want
+./redact.sh --audit                              # what would be stripped, writes nothing
+```
+
+`--keep-commands` is right here specifically because the command *is* the bug
+report. It removes home paths, emails, your account name and known secret
+shapes — but it's a pattern list, not a guarantee, so **read the line before you
+paste it**. It can't tell that an internal hostname or a customer name matters.
+
+Plain `./redact.sh` (no flags) drops command text entirely and keeps only
+statistics. That's the one for sharing a whole log; see the sharing section in
+the README.
 
 ## 🎛️ Changing a threshold or a question
 

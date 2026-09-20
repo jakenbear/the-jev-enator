@@ -501,6 +501,61 @@ team, prefer a shared org key you can rotate over personal keys, and treat
 the policy. Changing them in the repo and having people pull is the whole update
 mechanism — no redeploy, no restart beyond Claude Code itself.
 
+### 📊 Pooling logs across the team
+
+One person's log answers "is this threshold wrong for me." Several answer the
+question worth asking: is it wrong for one stack and fine everywhere else — which
+an average hides, and which is why `--by-source` exists.
+
+**Never share a raw log.** It contains your working directory, your full command
+text, and excerpts of your prompts. `redact.sh` strips them:
+
+```bash
+./redact.sh --audit                   # what would be stripped. Writes nothing.
+./redact.sh -o alice.jsonl            # share-safe: statistics only
+```
+
+The default keeps an allowlist — probabilities, latencies, verdicts, token
+counts, timestamps — and drops everything else, including a field it doesn't
+recognise. A new field added by a later commit is dropped rather than published.
+
+```bash
+./report.sh team/*.jsonl --by-source
+```
+
+```
+  SIDE BY SIDE
+
+  source          calls       blocked  asked  noticed  wouldblk
+  alice             412      7   1.7%     31       88         4
+  bob               389      6   1.5%     28       71         3
+  carol             455     48  10.5%     40       94         5
+```
+
+Carol's 10.5% is the finding. Same thresholds, different stack. Name the files
+after who or what they came from — that's where `source` comes from. Duplicate
+records are dropped on merge, so re-collecting the same logs weekly is safe.
+
+For piping into something else, every report is available as JSON:
+
+```bash
+./report.sh --json | jq '.summary.gate.outcomes'
+./report.sh team/*.jsonl --json | jq '.by_source | map_values(.gate.outcomes.deny)'
+```
+
+**Reporting one bad call is a different job**, and there the command text *is* the
+bug report:
+
+```bash
+./redact.sh --keep-commands -o bad-call.jsonl
+```
+
+That keeps `command` and `state_head`, run through a pattern scrubber for home
+paths, emails, your account name, and known secret shapes. It is weaker than the
+allowlist by construction — it can't know your internal hostname is sensitive —
+so read the output before sending it. `cwd` and `request_head` are dropped even
+then; there is no pattern that makes a sentence safe.
+
 ### 🎯 Tune it on yourself first
 
 Run it alone for a week before sharing. Every false positive is a five-minute
@@ -672,6 +727,7 @@ python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 python3 tests/test_install.py      # 53 assertions on install.sh; no key needed
+python3 tests/test_jev_logs.py     # 63 assertions on log merging and redaction
 ```
 
 `test_jev_finish.py` builds real transcript JSONL in a temp file per case, so the
@@ -758,6 +814,9 @@ CONTRIBUTING.md          setup, how to report a bad call, threshold rules
 assets/logo.svg          icon, dark background (logo-light.svg for light)
 verify.sh                prove all three hooks are on and working
 report.sh                read the audit log: what fired, and would it have been right
+redact.sh                strip a log so it can be shared (--audit says what goes)
+src/jev_logs.py          load, merge, filter and redact logs; shared by both
+tests/test_jev_logs.py   the merge and redaction rules, fixtures only
 tests/fixture_env.py     keeps fixture scores out of your real audit log
 tests/record_cassette.py record live responses so the suites run offline
 tests/cassette.json      those recordings; what CI replays
