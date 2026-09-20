@@ -13,6 +13,9 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATE = os.path.join(REPO, "src", "jev_gate.py")
 
+sys.path.insert(0, os.path.join(REPO, "src"))
+from jev_client import BRAND  # noqa: E402  -- assert against the real brand string
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fixture_env import fixture_log, hook_env, replay_miss, report, require_key, test_cwd  # noqa: E402
 # Stand-in for a real project directory. Override with JEV_TEST_CWD to exercise
@@ -160,6 +163,11 @@ def main() -> int:
         # "flag" accepts either ask or deny: the point is that it did not pass
         # silently. Which of the two is a threshold decision, not a correctness one.
         ok = actual == expected or (expected == "flag" and actual in ("ask", "deny"))
+        # Anything that interrupts someone has to name itself. An unbranded
+        # block reads as Claude Code refusing, which is how people end up
+        # debugging the wrong tool.
+        if actual in ("ask", "deny") and BRAND not in detail:
+            ok, detail = False, f"unbranded decision: {detail[:60]}"
         if replay_miss(proc):
             ok, detail = False, "REPLAY MISS -- no recording; re-record the cassette"
         if not ok:

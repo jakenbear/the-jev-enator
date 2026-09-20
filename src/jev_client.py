@@ -33,6 +33,46 @@ CA_CANDIDATES = (
 )
 
 
+# --- Branding -------------------------------------------------------------
+#
+# Every message these hooks emit is prefixed so it is instantly identifiable as
+# coming from The Jev-enator and not from Claude Code itself, the tool that ran,
+# or the model's own reasoning. Before this, a blocked call read as a generic
+# permission error and people reasonably assumed Claude Code had refused.
+#
+# Two levels, because the audiences differ:
+#
+#   banner()  goes to a human, in a terminal, rarely. A blocked tool call is the
+#             one moment this tool is the most annoying thing on screen, so it
+#             gets to look like something rather than like a stack trace.
+#
+#   tag()     goes into the model's context, on every single Bash call. It stays
+#             on one line. A multi-line ASCII banner there would be tokens spent
+#             on decoration in the hot path, repeated hundreds of times a day.
+#
+# ART is deliberately narrow (11 cols) so it survives a split pane.
+ART = "[ ⊙ ─ ]"
+
+# Plain text, no ANSI. Claude Code renders permissionDecisionReason itself, and
+# escape codes either show as literal garbage or get stripped -- verified while
+# debugging report.sh, where color codes broke a grep that looked correct.
+BRAND = "THE JEV-ENATOR"
+
+
+def banner(headline: str, verdict: str) -> str:
+    """Human-facing header for a decision that interrupts someone.
+
+    verdict is a short all-caps word: TERMINATED, FLAGGED. headline is the
+    one-line summary that follows it.
+    """
+    return f"{ART} {BRAND} · {verdict}\n{headline}"
+
+
+def tag(hook: str, elapsed_ms: int) -> str:
+    """One-line prefix for context injected into the model's transcript."""
+    return f"{ART} jev-{hook} · {elapsed_ms}ms"
+
+
 class JevError(Exception):
     """Any failure that should cause the calling hook to fail open."""
 

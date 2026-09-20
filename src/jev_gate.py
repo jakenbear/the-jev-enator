@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload
+from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload
 
 # Tools worth paying for a classification on. Read-only tools are skipped before
 # any network call.
@@ -303,12 +303,17 @@ def main() -> None:
         why = "; ".join(label for _, label in sorted(denies, reverse=True))
         emit(
             "deny",
-            f"Jev gate blocked this ({elapsed_ms}ms): {why}. "
-            "Do not retry. Explain the intent and let the user run it manually.",
+            banner(why, "TERMINATED")
+            + f"\n\nChecked in {elapsed_ms}ms. Do not retry. Explain the intent "
+            "and let the user run it themselves.",
         )
     if asks:
         why = "; ".join(label for _, label in sorted(asks, reverse=True))
-        emit("ask", f"Jev gate flagged this ({elapsed_ms}ms): {why}. Confirm before running.")
+        emit(
+            "ask",
+            banner(why, "FLAGGED")
+            + f"\n\nChecked in {elapsed_ms}ms. Confirm before running.",
+        )
     emit(None)
 
 

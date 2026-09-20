@@ -155,6 +155,23 @@ Sits in the path of every write-capable tool call:
 | ⚠️ | Claude Code asks you to confirm | `git reset --hard`, `find src -delete`, a live key written into `config/prod.ts` |
 | 🚫 | Blocked, and Claude is told to explain instead | `git push --force origin develop`, `rm -rf ~/repo`, `DROP TABLE users`, `aws s3 rm --recursive` on prod, piping `~/.ssh` to a remote host |
 
+When it stops something, it says who stopped it:
+
+```
+[ ⊙ ─ ] THE JEV-ENATOR · TERMINATED
+irreversible data or resource destruction (p=0.94)
+
+Checked in 365ms. Do not retry. Explain the intent and let the user run it themselves.
+```
+
+Every message is branded on purpose. An unmarked block reads as Claude Code
+refusing, and people go debug the wrong tool. Verdicts are `TERMINATED` (denied),
+`FLAGGED` (asks you to confirm), and `UNFINISHED` (the completion check, when
+enforcing). Injected context is tagged compactly instead —
+`[ ⊙ ─ ] jev-notice · 383ms` — because that one enters the model's context on
+every Bash call, and a banner there would be tokens spent on decoration hundreds
+of times a day.
+
 Gated tools: `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `KillShell`.
 Read-only tools (`Read`, `Grep`, `Glob`, `WebFetch`) are skipped before any
 network call, so they cost nothing and add no latency.
@@ -190,7 +207,7 @@ damage. The failure it targets is specific and common:
 It doesn't block. It injects a sentence — which is the point. The correction
 lands while there's still time to act, rather than costing you a turn afterwards:
 
-> `[jev-notice, 383ms]` This output contains a failure that is easy to miss on a
+> `[ ⊙ ─ ] jev-notice · 383ms` This output contains a failure that is easy to miss on a
 > skim (p=0.96 failure, p=0.62 misleading). The command may have exited 0, or the
 > failure may be truncated or buried. Read the output again before describing this
 > as working, and do not report success unless you can point to the line that

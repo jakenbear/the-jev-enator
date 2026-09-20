@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import os
 
-from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload
+from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload
 
 # Thresholds at which a question counts as a hit. In log-only mode a hit is just
 # recorded; under JEV_FINISH_ENFORCE=1 it blocks the stop. Higher than the
@@ -401,7 +401,8 @@ def main() -> None:
 
     why = "; ".join(f"{REASONS[name]} (p={prob:.2f})" for prob, name in hits)
     emit_block(
-        f"Do not end the turn yet. A completion check flagged: {why}.\n\n"
+        banner(f"Do not end the turn yet — {why}.", "UNFINISHED")
+        + "\n\n"
         "Finish the work: do the parts that were skipped, run the command that "
         "proves your claims, and replace any placeholder code. If the check is "
         "wrong and the work really is complete, say so explicitly and state what "

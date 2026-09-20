@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload
+from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload, tag
 
 # Below this, there is nothing to misread. Saves a call on the many Bash results
 # that are a single line or empty.
@@ -315,7 +315,7 @@ def main() -> None:
 
     if misleads >= EMPHATIC_AT:
         emit(
-            f"[jev-notice, {elapsed_ms}ms] This output contains a failure that is "
+            f"{tag('notice', elapsed_ms)} This output contains a failure that is "
             f"easy to miss on a skim (p={fail:.2f} failure, p={misleads:.2f} "
             "misleading). The command may have exited 0, or the failure may be "
             "truncated or buried. Read the output again before describing this as "
@@ -323,7 +323,7 @@ def main() -> None:
             f"that shows it.{hint or ''}"
         )
     emit(
-        f"[jev-notice, {elapsed_ms}ms] This output reports a failure "
+        f"{tag('notice', elapsed_ms)} This output reports a failure "
         f"(p={fail:.2f}). Address it or say so plainly; do not describe this step "
         f"as successful.{hint or ''}"
     )
