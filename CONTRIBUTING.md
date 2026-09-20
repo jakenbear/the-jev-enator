@@ -45,6 +45,7 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
+python3 tests/test_install.py      # 28 assertions on install.sh; no key needed
 ```
 
 These cost a fraction of a cent and take about a minute.

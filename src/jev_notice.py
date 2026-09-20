@@ -42,7 +42,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload, tag, top_two
+# ORDER MATTERS -- jev_pyversion must run before jev_client, which cannot even be
+# imported on Python 3.9. See src/jev_pyversion.py.
+from jev_pyversion import require_python
+
+require_python()
+
+from jev_client import (  # noqa: E402
+    JevError,
+    api_key,
+    ask_jev,
+    disabled,
+    log,
+    read_payload,
+    tag,
+    top_two,
+)
 
 # Below this, there is nothing to misread. Saves a call on the many Bash results
 # that are a single line or empty.

@@ -108,7 +108,7 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 8 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 12 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
@@ -119,12 +119,20 @@ Then go back to work. Nothing to run, nothing to remember. 🤖
 
 Requires Python 3.10+ and an existing Claude Code install. No dependencies.
 
+⚠️ **The Python version is not a soft requirement.** On 3.9 the hooks fail to
+import, emit nothing, and Claude Code reads "nothing" as "no objection" — so the
+install looks clean and protects you from nothing. `install.sh` refuses to install
+against an interpreter that old, and each hook re-checks at startup and prints a
+loud error instead of dying quietly. Which matters, because Claude Code resolves
+the hook through `#!/usr/bin/env python3` and so may pick a *different* `python3`
+than the one you installed with. `./verify.sh` prints the one it actually gets.
+
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 8 OKs
+./verify.sh                   # should print 12 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -136,6 +144,21 @@ input tokens, output free.
 you already have, backs up `settings.json` to `settings.json.bak-jevgate`, and is
 safe to run twice. It can live anywhere — paths are resolved relative to the
 script, so `~/the-jev-enator` is a suggestion, not a requirement.
+
+It refuses rather than guesses in two cases: a `python3` older than 3.10, and a
+`settings.json` that isn't valid JSON. The second one matters because a file
+Claude Code can't parse is a file it's already ignoring, and appending to it would
+destroy whatever is in there.
+
+`tests/test_install.py` covers this against settings files the author's machine
+never had — a coworker's hooks in the same events, a corrupt file, an entry
+listing our command alongside someone else's. No key or network needed.
+
+**Known limit:** hook commands are absolute paths, so `settings.json` isn't
+portable between machines even for the same user. Claude Code expands
+`${CLAUDE_PROJECT_DIR}` in a hook command but not `$HOME` or `~`, and
+`CLAUDE_PROJECT_DIR` is project-scoped, which is the wrong scope for a user-level
+hook. Re-run `install.sh` on each machine.
 
 To remove it:
 
@@ -617,6 +640,7 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
+python3 tests/test_install.py      # 28 assertions on install.sh; no key needed
 ```
 
 `test_jev_finish.py` builds real transcript JSONL in a temp file per case, so the
@@ -689,12 +713,14 @@ nothing here is correct.
 
 ```
 src/jev_client.py        shared Jev client: TLS, timeouts, logging, fail-open
+src/jev_pyversion.py     refuses to run on a Python too old to import the rest
 src/jev_gate.py          PreToolUse  — danger gate (enforcing)
 src/jev_notice.py        PostToolUse — failure notice (enforcing, injects text)
 src/jev_finish.py        Stop        — completion check (log-only)
-tests/test_jev_gate.py   23 fixture payloads, 14 safe and 9 dangerous
-tests/test_jev_notice.py 19 command outputs, 6 clean and 13 containing failures
+tests/test_jev_gate.py   26 fixture payloads, 15 safe and 11 dangerous
+tests/test_jev_notice.py 20 command outputs, 6 clean and 14 containing failures
 tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stops
+tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 install.sh               wire into / out of settings.json
 CONTRIBUTING.md          setup, how to report a bad call, threshold rules

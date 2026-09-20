@@ -15,8 +15,26 @@ GATE="$REPO/src/jev_gate.py"
 FINISH="$REPO/src/jev_finish.py"
 NOTICE="$REPO/src/jev_notice.py"
 
+# Refuse to install against an interpreter that cannot run the hooks. On 3.9 the
+# annotations in jev_client raise TypeError at import, and a hook that dies on
+# import is indistinguishable from one that approved the call -- so without this
+# check the install "succeeds" and protects nothing.
+if ! python3 "$REPO/src/jev_pyversion.py" >/dev/null; then
+  echo >&2
+  echo "Refusing to install: the python3 on PATH cannot run these hooks." >&2
+  exit 1
+fi
+
 if [[ ! -f "$SETTINGS" ]]; then
   echo "No $SETTINGS found. Start Claude Code once, then re-run." >&2
+  exit 1
+fi
+
+# Claude Code merges this file; a syntax error here means it is already ignoring
+# your settings, and appending to it would destroy whatever is in there.
+if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SETTINGS" 2>/dev/null; then
+  echo "$SETTINGS is not valid JSON. Refusing to overwrite it." >&2
+  echo "Fix or move it, then re-run. Claude Code is ignoring it as-is." >&2
   exit 1
 fi
 
@@ -76,8 +94,25 @@ for event, script, matcher in WIRING:
 
     name = pathlib.Path(script).stem
     if mode == "uninstall":
-        kept = [e for e in entries if not owns(e)]
-        if len(kept) < len(entries):
+        # Remove our command, not the entry containing it. Claude Code allows
+        # several commands per entry, so dropping the whole entry also deletes a
+        # co-tenant's hook -- someone else's audit or formatting hook vanishing
+        # from a file we were only supposed to remove ourselves from. Nobody
+        # notices that until the hook they relied on stops firing.
+        kept = []
+        removed = False
+        for entry in entries:
+            if not owns(entry):
+                kept.append(entry)
+                continue
+            removed = True
+            others = [h for h in entry.get("hooks", []) if h.get("command") != script]
+            # Keep the entry only if something else still lives in it; an entry
+            # with an empty hooks list is noise Claude Code would iterate over.
+            if others:
+                entry["hooks"] = others
+                kept.append(entry)
+        if removed:
             changed.append(f"removed {name} from {event}")
         hooks[event] = kept
     else:

@@ -23,6 +23,39 @@ echo
 echo "The Jev-enator status"
 echo
 
+# 0. Can the interpreter Claude Code will actually reach even run the hooks?
+#
+# Checked first and reported with the path, because this is the failure that
+# looks like success. The hooks are invoked via '#!/usr/bin/env python3', so the
+# interpreter is resolved from Claude Code's PATH at hook time -- not from this
+# shell. They can differ. On 3.9 the hook dies importing jev_client, emits
+# nothing, and Claude Code proceeds as if the call were approved.
+PYV="$(python3 "$REPO/src/jev_pyversion.py" 2>&1)"
+if [[ $? -eq 0 ]]; then
+  ok "python3 is ${PYV#ok } at $(command -v python3)"
+else
+  bad "python3 on PATH is too old to run the hooks"
+  note "$(command -v python3) -- $(python3 -V 2>&1)"
+  note "the hooks would die on import and every tool call would be allowed"
+fi
+
+# 0b. Each hook must survive being run with junk on stdin. This catches a syntax
+# error, a bad import, or a missing sibling module -- all of which otherwise show
+# up only as a gate that silently stopped gating.
+for spec in "$GATE:danger gate" "$NOTICE:failure notice" "$FINISH:completion check"; do
+  IFS=':' read -r script label <<<"$spec"
+  ERR="$(echo 'not json' | python3 "$script" 2>&1 >/dev/null)"
+  if [[ -z "$ERR" ]]; then
+    ok "$label runs and exits cleanly"
+  else
+    # First line, not last: our own version message leads with the headline, and
+    # a traceback's last line is the exception -- both are more useful than the
+    # closing line of either.
+    bad "$label failed to run: $(echo "$ERR" | head -1)"
+    note "until this is fixed the hook cannot protect anything"
+  fi
+done
+
 # 1. Both hooks registered?
 registered() {
   python3 -c "

@@ -68,6 +68,46 @@ jobs:
         run: python3 tests/test_jev_finish.py
         env:
           JEV_GATE_REPLAY: tests/cassette.json
+      - name: Installer
+        # Runs install.sh against a throwaway HOME. No key and no network, so it
+        # belongs in the replay job. This is the only coverage of the code that
+        # edits a file we do not own, and the only check that Linux is exercised
+        # at all -- issue #4.
+        run: python3 tests/test_install.py
+
+  version-guard:
+    # The hooks must refuse to run on an interpreter that cannot import them,
+    # rather than dying on import and emitting nothing -- which Claude Code reads
+    # as "no decision" and allows. That is the one bug in this repo that makes it
+    # silently useless, so it gets a job that actually runs a 3.9.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Version probe reports the problem
+        run: |
+          if python3 src/jev_pyversion.py; then
+            echo "FAIL: 3.9 was accepted"; exit 1
+          fi
+          echo "ok  3.9 rejected by the probe"
+      - name: Every hook refuses loudly, and emits nothing on stdout
+        # Empty stdout matters as much as the exit code: anything printed there
+        # that is not a valid decision is a payload Claude Code has to parse.
+        run: |
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py; do
+            out="$(echo '{}' | python3 "$h" 2>/tmp/err)" && { echo "FAIL: $h exited 0 on 3.9"; exit 1; }
+            [ -z "$out" ] || { echo "FAIL: $h wrote to stdout on 3.9: $out"; exit 1; }
+            grep -q "THE JEV-ENATOR" /tmp/err || { echo "FAIL: $h gave no branded error"; cat /tmp/err; exit 1; }
+            echo "ok  $h refused loudly"
+          done
+      - name: JEV_GATE_DISABLE still works when the interpreter is too old
+        # The documented way to turn this repo off has to keep working even when
+        # the repo is broken, or the only escape is uninstalling.
+        run: |
+          echo '{}' | JEV_GATE_DISABLE=1 python3 src/jev_gate.py
+          echo "ok  disable honoured on 3.9"
 
   test-live:
     # Only on main and manual runs: costs real money, and a fork PR has no

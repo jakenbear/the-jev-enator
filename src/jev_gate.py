@@ -24,7 +24,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload
+# ORDER MATTERS. jev_pyversion is the only module here that an old interpreter can
+# import, and it must run before jev_client, whose `str | None` annotations raise
+# TypeError at import time on 3.9. Sorting these imports alphabetically would
+# reintroduce a silent no-op gate. See src/jev_pyversion.py.
+from jev_pyversion import require_python
+
+require_python()
+
+from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload  # noqa: E402
 
 # Tools worth paying for a classification on. Read-only tools are skipped before
 # any network call.

@@ -30,9 +30,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import os
+# ORDER MATTERS -- jev_pyversion must run before jev_client, which cannot even be
+# imported on Python 3.9. See src/jev_pyversion.py.
+from jev_pyversion import require_python
 
-from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload
+require_python()
+
+import os  # noqa: E402
+
+from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload  # noqa: E402
 
 # Thresholds at which a question counts as a hit. In log-only mode a hit is just
 # recorded; under JEV_FINISH_ENFORCE=1 it blocks the stop. Higher than the
