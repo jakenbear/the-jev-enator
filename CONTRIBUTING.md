@@ -35,6 +35,12 @@ These hit the live API, so they cost a fraction of a cent and take about a minut
 Run all three before opening a PR — the thresholds interact, and it's easy to fix
 one case by breaking another.
 
+Each suite logs its classifications to its own temp file and prints the path when
+it finishes — your real `~/jev-gate.jsonl` is untouched. If you add a suite, use
+`tests/fixture_env.py`; pass `env=hook_env(log_path)` to every `subprocess.run`.
+Fixtures are extreme by design, and letting them into the real log destroys the
+score distribution `report.sh` exists to show you.
+
 Expect **occasional** flakiness. A couple of fixtures sit within 0.02 of their
 threshold, so a rerun can flip them. If a case fails, rerun before debugging. If
 it fails twice, it's real.

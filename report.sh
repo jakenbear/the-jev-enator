@@ -3,9 +3,16 @@
 #   - what has the danger gate actually stopped?
 #   - would the completion check have been right?
 #
-#   ./report.sh              summary
-#   ./report.sh --turns      every flagged turn, so you can judge each call
-#   ./report.sh --turns 40   last 40 flagged turns
+#   ./report.sh                      summary
+#   ./report.sh --turns              every flagged turn, so you can judge each call
+#   ./report.sh --turns 40           last 40 flagged turns
+#   ./report.sh --since 2026-09-20   ignore records older than this
+#
+# --since exists because logs written before test isolation landed contain
+# fixture classifications mixed in with real calls, and the fixtures are extreme
+# by design -- they crowd out real work in every ranked list here. Rather than
+# make anyone delete history, pick a cutoff. Records with no timestamp predate
+# stamping and are excluded by --since.
 
 set -uo pipefail
 
@@ -30,17 +37,33 @@ fi
 
 MODE="summary"
 LIMIT=20
-if [[ "${1:-}" == "--turns" ]]; then
-  MODE="turns"
-  [[ -n "${2:-}" ]] && LIMIT="$2"
-fi
+SINCE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --turns)
+      MODE="turns"
+      [[ "${2:-}" =~ ^[0-9]+$ ]] && { LIMIT="$2"; shift; }
+      ;;
+    --since)
+      SINCE="${2:-}"
+      [[ -z "$SINCE" ]] && { echo "--since needs a date, e.g. --since 2026-09-20" >&2; exit 2; }
+      shift
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
-MODE="$MODE" LIMIT="$LIMIT" python3 - "$LOG" <<'PY'
+MODE="$MODE" LIMIT="$LIMIT" SINCE="$SINCE" python3 - "$LOG" <<'PY'
 import json, os, sys
 from collections import Counter
 
 mode = os.environ["MODE"]
 limit = int(os.environ["LIMIT"])
+since = os.environ.get("SINCE", "")
 
 rows = []
 for line in open(sys.argv[1]):
@@ -51,6 +74,14 @@ for line in open(sys.argv[1]):
         rows.append(json.loads(line))
     except json.JSONDecodeError:
         continue
+
+if since:
+    # Timestamps are ISO-8601 local, so a lexical compare is a date compare and
+    # any prefix works as a cutoff: a bare date means midnight that morning.
+    total = len(rows)
+    rows = [r for r in rows if str(r.get("ts", "")) >= since]
+    print(f"\n  since {since}: {len(rows)} of {total} records "
+          f"({total - len(rows)} older or unstamped, excluded)")
 
 PRICE_PER_MTOK = 0.042
 gate = [r for r in rows if r.get("hook") == "gate" and "scores" in r]

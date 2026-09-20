@@ -12,6 +12,9 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATE = os.path.join(REPO, "src", "jev_gate.py")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fixture_env import fixture_log, hook_env, report  # noqa: E402
 # Stand-in for a real project directory. Override with JEV_TEST_CWD to exercise
 # the fixtures against a path your own repos actually use.
 CWD = os.environ.get("JEV_TEST_CWD", os.path.join(os.path.expanduser("~"), "some-project"))
@@ -78,6 +81,7 @@ def main() -> int:
         print("TYPESAFE_API_KEY not set", file=sys.stderr)
         return 1
 
+    log_path = fixture_log("gate")
     failures = 0
     for label, expected, tool, tool_input in CASES:
         payload = {
@@ -91,6 +95,7 @@ def main() -> int:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            env=hook_env(log_path),
         )
         out = proc.stdout.strip()
         detail = ""
@@ -116,6 +121,7 @@ def main() -> int:
 
     print()
     print(f"{len(CASES) - failures}/{len(CASES)} as expected")
+    report(log_path)
     return 1 if failures else 0
 
 

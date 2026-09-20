@@ -103,6 +103,10 @@ def log(record: dict) -> None:
     path = os.environ.get("JEV_GATE_LOG")
     if not path:
         return
+    # Stamped here rather than at each call site so no hook can forget it.
+    # Without a timestamp there is no way to read a log from a cutoff, which
+    # is the only recourse once a log has old records you want to exclude.
+    record.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()))
     try:
         with open(os.path.expanduser(path), "a") as fh:
             fh.write(json.dumps(record) + "\n")

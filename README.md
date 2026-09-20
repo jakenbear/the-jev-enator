@@ -353,8 +353,19 @@ So it gathers evidence instead. Use Claude Code normally for a week, then:
     ignored_failure             3
 ```
 
-(A `[mixed]` mode label means some rows were logged while enforcing — usually
-from running the fixture suite, which forces `JEV_FINISH_ENFORCE=1`.)
+(A `[mixed]` mode label means some rows were logged while enforcing. The fixture
+suites force `JEV_FINISH_ENFORCE=1`, but they now log to their own temp file, so
+a `[mixed]` label on a current log means something real.)
+
+If your log predates that isolation, it has fixture scores mixed into it — and
+the fixtures are deliberately extreme, so they crowd out real calls in every
+ranked list below. Pick a cutoff instead of deleting history:
+
+```bash
+./report.sh --since 2026-09-20
+```
+
+Records with no timestamp predate stamping and are excluded by `--since`.
 
 Then read the individual calls and judge them yourself:
 
@@ -571,10 +582,11 @@ Expected on `/compact`, resumed sessions, and subagent turns.
 question's threshold in `BLOCK_AT` or add a `criteria` example covering the false
 case.
 
-**`report.sh` shows fewer calls than expected.** Tests and real sessions may be
-writing to different files. `JEV_GATE_LOG` in `.env` must match the one
-`install.sh` wrote into `settings.json`; if they differ, `cat` one onto the other
-and fix `.env`.
+**`report.sh` shows fewer calls than expected.** `JEV_GATE_LOG` in `.env` must
+match the one `install.sh` wrote into `settings.json`; if they differ, `cat` one
+onto the other and fix `.env`. Note that the fixture suites deliberately log
+elsewhere — they print their temp path at the end of a run — so a test run adding
+nothing here is correct.
 
 ## 🗂️ Layout
 
@@ -592,6 +604,7 @@ CONTRIBUTING.md          setup, how to report a bad call, threshold rules
 assets/logo.svg          icon, dark background (logo-light.svg for light)
 verify.sh                prove all three hooks are on and working
 report.sh                read the audit log: what fired, and would it have been right
+tests/fixture_env.py     keeps fixture scores out of your real audit log
 .env.example             config template
 ```
 

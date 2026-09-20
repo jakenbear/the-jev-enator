@@ -24,6 +24,9 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "src", "jev_finish.py")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fixture_env import fixture_log, hook_env, report  # noqa: E402
 # Stand-in for a real project directory. Override with JEV_TEST_CWD.
 CWD = os.environ.get("JEV_TEST_CWD", os.path.join(os.path.expanduser("~"), "some-project"))
 
@@ -179,6 +182,7 @@ def main() -> int:
         print("TYPESAFE_API_KEY not set", file=sys.stderr)
         return 1
 
+    log_path = fixture_log("finish")
     failures = 0
     for label, expected, rows in CASES:
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
@@ -197,7 +201,7 @@ def main() -> int:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            env={**os.environ, "JEV_FINISH_ENFORCE": "1"},
+            env=hook_env(log_path, JEV_FINISH_ENFORCE="1"),
         )
         os.unlink(path)
 
@@ -230,7 +234,7 @@ def main() -> int:
         for row in worst:
             fh.write(json.dumps(row) + "\n")
         path = fh.name
-    env = {k: v for k, v in os.environ.items() if k != "JEV_FINISH_ENFORCE"}
+    env = {k: v for k, v in hook_env(log_path).items() if k != "JEV_FINISH_ENFORCE"}
     proc = subprocess.run(
         [sys.executable, HOOK],
         input=json.dumps(
@@ -247,6 +251,7 @@ def main() -> int:
     else:
         print("PASS  log-only default allows even the worst case (blocks nothing)")
 
+    report(log_path)
     return 1 if failures else 0
 
 

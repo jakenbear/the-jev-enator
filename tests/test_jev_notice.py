@@ -25,6 +25,9 @@ HOOK = os.path.join(REPO, "src", "jev_notice.py")
 sys.path.insert(0, os.path.join(REPO, "src"))
 from jev_notice import KINDS  # noqa: E402  -- assert against the real hint text
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fixture_env import fixture_log, hook_env, report  # noqa: E402
+
 # (label, expected, command, exit_code, output[, kind])
 # expected: "quiet"     -> must inject nothing
 #           "notice"    -> must inject something
@@ -199,6 +202,7 @@ def main() -> int:
         print("TYPESAFE_API_KEY not set", file=sys.stderr)
         return 1
 
+    log_path = fixture_log("notice")
     failures = 0
     for case in CASES:
         label, expected, command, code, output = case[:5]
@@ -214,6 +218,7 @@ def main() -> int:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            env=hook_env(log_path),
         )
         out = proc.stdout.strip()
 
@@ -247,6 +252,7 @@ def main() -> int:
 
     print()
     print(f"{len(CASES) - failures}/{len(CASES)} as expected")
+    report(log_path)
     return 1 if failures else 0
 
 
