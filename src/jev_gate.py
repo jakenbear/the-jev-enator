@@ -8,12 +8,17 @@ Fails open: any error, timeout, or missing key emits no decision, so Claude Code
 falls back to its normal permission flow.
 
 Env:
-  TYPESAFE_API_KEY   required, else the hook no-ops
-  JEV_GATE_LOG       optional path for a JSONL audit log
-  JEV_GATE_DISABLE   set to 1 to bypass entirely
+  TYPESAFE_API_KEY       required, else the hook no-ops
+  JEV_GATE_LOG           optional path for a JSONL audit log
+  JEV_GATE_DISABLE       set to 1 to bypass entirely
+  JEV_GATE_EXTRA_TOOLS   comma-separated extra tool names to gate, e.g. MCP tools
+
+Also: `jev_gate.py --matcher` prints the PreToolUse matcher regex, which is how
+install.sh gets it. See GATED_TOOLS.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +28,31 @@ from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload
 
 # Tools worth paying for a classification on. Read-only tools are skipped before
 # any network call.
-GATED_TOOLS = {"Bash", "Write", "Edit", "NotebookEdit", "KillShell"}
+#
+# install.sh derives the PreToolUse matcher from this set by running
+# `jev_gate.py --matcher`, so the two cannot drift. They did: the matcher was
+# hardcoded as "Bash|Write|Edit|NotebookEdit" while this set also listed
+# KillShell, and neither mentioned MultiEdit -- which rewrites many files in one
+# call and so is strictly more destructive than the Edit that was gated.
+GATED_TOOLS = {"Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "KillShell"}
+
+# MCP tools can do anything the server exposes -- drop a table, delete a bucket,
+# post to a channel -- and nothing about them reaches this gate by default.
+#
+# Opt-in rather than a blanket mcp__.* matcher, for two reasons. Their payloads
+# have no shared shape, so build_state can only dump JSON at them and the
+# questions are answering against a much weaker state than they get for Bash.
+# And a chatty server would pay ~350ms and a call on every single invocation.
+# Name the ones that can actually destroy something.
+#
+#   export JEV_GATE_EXTRA_TOOLS="mcp__supabase__execute_sql,mcp__aws__delete"
+def extra_tools() -> set[str]:
+    raw = os.environ.get("JEV_GATE_EXTRA_TOOLS", "")
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
+def gated_tools() -> set[str]:
+    return GATED_TOOLS | extra_tools()
 
 # Per-question thresholds as (deny_at, ask_at). Tuned against tests/.
 #
@@ -184,17 +213,50 @@ def build_state(payload: dict) -> str:
         lines.append(f"Command:\n{tool_input.get('command', '')}")
         if tool_input.get("description"):
             lines.append(f"Stated purpose: {tool_input['description']}")
+    elif tool == "MultiEdit":
+        # Every edit matters, not just the first: one benign rename alongside a
+        # wholesale file replacement should still read as destructive. Budget is
+        # split across edits so a 40-edit call cannot blow past the state size
+        # that the questions were tuned against.
+        edits = tool_input.get("edits") or []
+        lines.append(f"Target path: {tool_input.get('file_path', '')}")
+        lines.append(f"Number of edits in this single call: {len(edits)}")
+        per_edit = max(200, 2000 // max(len(edits), 1))
+        for i, edit in enumerate(edits, 1):
+            if not isinstance(edit, dict):
+                continue
+            old = str(edit.get("old_string", ""))[:per_edit]
+            new = str(edit.get("new_string", ""))[:per_edit]
+            scope = " (all occurrences)" if edit.get("replace_all") else ""
+            lines.append(f"Edit {i}{scope}:\n  replacing:\n{old}\n  with:\n{new}")
     elif tool in ("Write", "Edit", "NotebookEdit"):
         lines.append(f"Target path: {tool_input.get('file_path', '')}")
         body = tool_input.get("content") or tool_input.get("new_string") or ""
         lines.append(f"Content being written (truncated):\n{body[:2000]}")
     else:
+        # Anything from JEV_GATE_EXTRA_TOOLS lands here. There is no shape to
+        # rely on, so say so plainly rather than letting the questions assume a
+        # missing 'command' or 'file_path' means the call is harmless.
+        if tool.startswith("mcp__"):
+            parts = tool.split("__")
+            server = parts[1] if len(parts) > 2 else "unknown"
+            lines.append(
+                f"This is an MCP tool call to the '{server}' server. It runs "
+                "outside this machine's shell and may act on remote or "
+                "production systems. Judge it by its arguments alone."
+            )
         lines.append(f"Arguments:\n{json.dumps(tool_input)[:2000]}")
 
     return "\n\n".join(lines)
 
 
 def main() -> None:
+    # install.sh asks for the matcher instead of keeping its own copy. Sorted so
+    # the value is stable and a settings.json diff means a real change.
+    if "--matcher" in sys.argv[1:]:
+        print("|".join(sorted(gated_tools())))
+        sys.exit(0)
+
     if disabled():
         emit(None)
 
@@ -203,7 +265,7 @@ def main() -> None:
         emit(None)
 
     payload = read_payload()
-    if payload is None or payload.get("tool_name") not in GATED_TOOLS:
+    if payload is None or payload.get("tool_name") not in gated_tools():
         emit(None)
 
     state = build_state(payload)

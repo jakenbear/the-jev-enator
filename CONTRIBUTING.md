@@ -26,7 +26,7 @@ Restart Claude Code after installing; `settings.json` is only read at startup.
 
 ```bash
 source .env
-python3 tests/test_jev_gate.py     # 23 cases: 14 safe, 9 dangerous
+python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 19 cases: 6 quiet, 13 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 ```

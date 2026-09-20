@@ -39,8 +39,19 @@ if [[ "$MODE" == "install" && -z "$KEY" ]]; then
   exit 1
 fi
 
+# Ask the gate which tools it checks rather than keeping a second list here. The
+# two drifted before: this file's hardcoded matcher omitted KillShell, which
+# GATED_TOOLS had, and neither list mentioned MultiEdit -- so multi-file rewrites
+# reached no gate at all. One source of truth, no drift. See issue #2.
+GATE_MATCHER="$(python3 "$GATE" --matcher)"
+if [[ -z "$GATE_MATCHER" ]]; then
+  echo "Could not read the gated tool list from $GATE --matcher." >&2
+  echo "Refusing to install a gate that matches nothing." >&2
+  exit 1
+fi
+
 MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" KEY="$KEY" SETTINGS="$SETTINGS" \
-LOG="$HOME/jev-gate.jsonl" python3 - <<'PY'
+GATE_MATCHER="$GATE_MATCHER" LOG="$HOME/jev-gate.jsonl" python3 - <<'PY'
 import json, os, pathlib
 
 mode = os.environ["MODE"]
@@ -48,7 +59,7 @@ path = pathlib.Path(os.environ["SETTINGS"])
 
 # (hook event, script, matcher or None)
 WIRING = [
-    ("PreToolUse", os.environ["GATE"], "Bash|Write|Edit|NotebookEdit"),
+    ("PreToolUse", os.environ["GATE"], os.environ["GATE_MATCHER"]),
     ("PostToolUse", os.environ["NOTICE"], "Bash"),
     ("Stop", os.environ["FINISH"], None),
 ]
@@ -69,12 +80,23 @@ for event, script, matcher in WIRING:
         if len(kept) < len(entries):
             changed.append(f"removed {name} from {event}")
         hooks[event] = kept
-    elif not any(owns(e) for e in entries):
-        entry = {"hooks": [{"type": "command", "command": script}]}
-        if matcher:
-            entry["matcher"] = matcher
-        entries.append(entry)
-        changed.append(f"added {name} to {event}")
+    else:
+        mine = [e for e in entries if owns(e)]
+        if not mine:
+            entry = {"hooks": [{"type": "command", "command": script}]}
+            if matcher:
+                entry["matcher"] = matcher
+            entries.append(entry)
+            changed.append(f"added {name} to {event}")
+        elif matcher:
+            # Already installed, but the matcher may have widened since -- a new
+            # gated tool ships as a code change, and without this a reinstall
+            # would silently leave the old, narrower list in place. That is how
+            # MultiEdit would have stayed ungated for everyone already running it.
+            for entry in mine:
+                if entry.get("matcher") != matcher:
+                    entry["matcher"] = matcher
+                    changed.append(f"updated {name} matcher on {event} -> {matcher}")
 
 env = data.setdefault("env", {})
 if mode == "uninstall":

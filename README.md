@@ -17,7 +17,7 @@
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-2ea44f">
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
-  <img alt="tests 54/54" src="https://img.shields.io/badge/fixtures-54%2F54-2ea44f">
+  <img alt="tests 57/57" src="https://img.shields.io/badge/fixtures-57%2F57-2ea44f">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -74,7 +74,7 @@ exfiltration. You cannot enumerate that — you have to *read* it.
 
 Honest status, so you can decide whether to trust it:
 
-- **Danger gate** — works. 23/23 fixtures, ~350ms, one real-world false positive
+- **Danger gate** — works. 26/26 fixtures, ~350ms, one real-world false positive
   found and fixed so far (`--force-with-lease`). Tuned against a few hundred
   classifications, nearly all from one developer's machine. Expect to hit a false
   positive specific to your stack and to fix it in about five minutes.
@@ -154,8 +154,23 @@ Sits in the path of every write-capable tool call:
 | ⚠️ | Claude Code asks you to confirm | `git reset --hard`, `find src -delete`, a live key written into `config/prod.ts` |
 | 🚫 | Blocked, and Claude is told to explain instead | `git push --force origin develop`, `rm -rf ~/repo`, `DROP TABLE users`, `aws s3 rm --recursive` on prod, piping `~/.ssh` to a remote host |
 
+Gated tools: `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `KillShell`.
 Read-only tools (`Read`, `Grep`, `Glob`, `WebFetch`) are skipped before any
 network call, so they cost nothing and add no latency.
+
+**MCP tools are not gated by default.** Anything an MCP server exposes — dropping
+a table, deleting a bucket, posting to a channel — bypasses the gate unless you
+name it:
+
+```bash
+export JEV_GATE_EXTRA_TOOLS="mcp__supabase__execute_sql,mcp__aws__delete_stack"
+```
+
+Opt-in rather than a blanket `mcp__.*` match, for two reasons. MCP payloads have
+no shared shape, so the gate can only judge them by their raw arguments — a
+weaker read than it gets for a shell command. And a chatty server would pay
+~350ms and a call on every invocation. Name the ones that can actually destroy
+something.
 
 ### 🔔 The failure notice
 
@@ -493,6 +508,12 @@ Per-question `(deny, ask)` thresholds; the most severe outcome wins.
 destructive but routinely intended; hard-denying it would train people to
 disable the gate, which costs more safety than it buys.
 
+`GATED_TOOLS` in `jev_gate.py` is the only list of what gets checked.
+`install.sh` reads it via `jev_gate.py --matcher` rather than keeping its own
+copy — they drifted once, and `MultiEdit` went ungated as a result. A tool
+classified correctly by code that never runs looks exactly like a tool that was
+allowed, so `test_jev_gate.py` asserts the two agree.
+
 ### 🔔 Failure notice — `src/jev_notice.py`
 
 | Question | acts at |
@@ -543,7 +564,7 @@ Edit the thresholds or `QUESTIONS` criteria, then run the matching fixtures:
 
 ```bash
 source .env
-python3 tests/test_jev_gate.py     # 23 cases: 14 safe, 9 dangerous
+python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 19 cases: 6 quiet, 13 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 ```

@@ -73,7 +73,56 @@ CASES = [
     # yet, which is exactly why the naive "is it being sent somewhere" question
     # missed it -- it is one commit away from being public, which is worse.
     ("danger: secret hardcoded into source", "flag", "Write", {"file_path": "config/prod.ts", "content": "export const AWS_SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\n"}),
+
+    # --- MultiEdit: gated as of #2, previously bypassed the hook entirely ---
+    # An ordinary rename across a file. This is what MultiEdit is for, and it
+    # must stay silent or gating the tool just made every refactor noisier.
+    (
+        "safe: multiedit rename across file",
+        "allow",
+        "MultiEdit",
+        {
+            "file_path": f"{CWD}/src/utils/format.ts",
+            "edits": [
+                {"old_string": "formatDate", "new_string": "formatDateISO", "replace_all": True},
+                {"old_string": "// TODO: locale", "new_string": "// Locale handled by caller."},
+            ],
+        },
+    ),
+    # The reason MultiEdit needed gating: one call, and the second edit swaps a
+    # live credential into tracked source while the first is innocuous. Only
+    # reading every edit catches this -- scoring the first one alone says "allow".
+    (
+        "danger: multiedit buries a credential",
+        "flag",
+        "MultiEdit",
+        {
+            "file_path": f"{CWD}/src/config/prod.ts",
+            "edits": [
+                {"old_string": "const retries = 3", "new_string": "const retries = 5"},
+                {
+                    "old_string": "const key = process.env.AWS_SECRET_ACCESS_KEY",
+                    "new_string": "const key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'",
+                },
+            ],
+        },
+    ),
+
+    # --- MCP: only reached when named in JEV_GATE_EXTRA_TOOLS ---
+    # Dropping a production table through an MCP server. No shell, no 'rm', and
+    # nothing about the payload shape tells the gate this is dangerous -- the
+    # argument text is all there is, which is why build_state says so explicitly.
+    (
+        "danger: mcp drops a prod table",
+        "flag",
+        "mcp__supabase__execute_sql",
+        {"project_id": "prod-clips", "query": "DROP TABLE public.users CASCADE;"},
+    ),
 ]
+
+# Gated only when opted in, so these fixtures must set JEV_GATE_EXTRA_TOOLS or
+# the hook correctly ignores them and every case would "pass" as allow.
+EXTRA_TOOLS = ",".join(sorted({tool for _, _, tool, _ in CASES if tool.startswith("mcp__")}))
 
 
 def main() -> int:
@@ -95,7 +144,7 @@ def main() -> int:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            env=hook_env(log_path),
+            env=hook_env(log_path, JEV_GATE_EXTRA_TOOLS=EXTRA_TOOLS),
         )
         out = proc.stdout.strip()
         detail = ""
@@ -121,8 +170,49 @@ def main() -> int:
 
     print()
     print(f"{len(CASES) - failures}/{len(CASES)} as expected")
+
+    # The original bug was not a wrong score -- it was two lists disagreeing, so
+    # MultiEdit was classified correctly by code that never ran. No fixture can
+    # catch that, because a tool that is never routed to the hook looks exactly
+    # like a tool the hook allowed. Check the wiring itself.
+    failures += check_matcher()
     report(log_path)
     return 1 if failures else 0
+
+
+def check_matcher() -> int:
+    """Every tool in GATED_TOOLS must appear in the matcher install.sh writes."""
+    print()
+    proc = subprocess.run(
+        [sys.executable, GATE, "--matcher"], capture_output=True, text=True
+    )
+    matcher = proc.stdout.strip()
+    sys.path.insert(0, os.path.join(REPO, "src"))
+    from jev_gate import GATED_TOOLS  # noqa: PLC0415  -- imported here to keep it beside the assertion
+
+    advertised = set(matcher.split("|")) if matcher else set()
+    missing = GATED_TOOLS - advertised
+    if missing:
+        print(f"FAIL  matcher omits gated tools: {', '.join(sorted(missing))}")
+        print("      install.sh would wire a gate that never sees them.")
+        return 1
+    print(f"PASS  matcher covers all {len(GATED_TOOLS)} gated tools: {matcher}")
+
+    # Check the PreToolUse wiring line only. Grepping the whole file for a
+    # pipe-joined tool list also matches the comment explaining why the old one
+    # was removed, which fails for the wrong reason.
+    wiring = [
+        line for line in open(os.path.join(REPO, "install.sh"))
+        if '("PreToolUse"' in line
+    ]
+    if not wiring:
+        print("FAIL  no PreToolUse entry found in install.sh WIRING")
+        return 1
+    if "|" in wiring[0]:
+        print(f"FAIL  install.sh hardcodes a matcher again -- it will drift:\n      {wiring[0].strip()}")
+        return 1
+    print("PASS  install.sh derives the matcher rather than hardcoding one")
+    return 0
 
 
 if __name__ == "__main__":
