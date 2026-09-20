@@ -13,7 +13,7 @@ the check is accurate on real work. For that, run log-only for a week and read
 ./report.sh --turns.
 
 Usage:
-  cd ~/jev-gate && source .env && python3 tests/test_jev_finish.py
+  cd ~/the-jev-enator && source .env && python3 tests/test_jev_finish.py
 """
 
 import json
@@ -111,7 +111,7 @@ CASES = [
         # rows are mistaken for the request, the state scores a turn that never
         # happened -- confident answer, no tools, no discernible request.
         [
-            user("<bash-input>~/jev-gate/report.sh --turns</bash-input>"),
+            user("<bash-input>~/the-jev-enator/report.sh --turns</bash-input>"),
             user(
                 "<bash-stdout>Last 20 flagged turns (of 31 flagged / 70 total)\n\n"
                 "  blocked  ignored_failure\n    request: Fix the failing test in src/utils.\n"
@@ -122,7 +122,7 @@ CASES = [
             ),
         ]
         + [says(
-            "```\ncd ~/jev-gate && ./verify.sh\n```\n\n"
+            "```\ncd ~/the-jev-enator && ./verify.sh\n```\n\n"
             "It has to run from that directory because it sources `.env` by relative path. "
             "It fires one test call at each of the three hooks and prints a PASS line per hook."
         )],

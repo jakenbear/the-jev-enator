@@ -2,7 +2,7 @@
 """Fire sample PreToolUse payloads at jev_gate.py and print the decisions.
 
 Usage:
-  cd ~/jev-gate && source .env && python3 tests/test_jev_gate.py
+  cd ~/the-jev-enator && source .env && python3 tests/test_jev_gate.py
 """
 
 import json

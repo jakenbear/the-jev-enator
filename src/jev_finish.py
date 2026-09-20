@@ -18,10 +18,12 @@ Fails open: any error, timeout, or missing key lets the turn end normally.
 
 Env:
   TYPESAFE_API_KEY      required, else the hook no-ops
-  JEV_GATE_LOG          path for the JSONL audit log (required to be useful)
+  JEV_LOG               path for the JSONL audit log (required to be useful)
   JEV_FINISH_ENFORCE    set to 1 to actually block; default is log-only
   JEV_FINISH_OFF        set to 1 to bypass only this hook
-  JEV_GATE_DISABLE      set to 1 to bypass every hook in this repo
+  JEV_DISABLE           set to 1 to bypass every hook in this repo
+
+The JEV_GATE_* spellings of the shared vars still work. See jev_client.LEGACY_ENV.
 """
 
 import json

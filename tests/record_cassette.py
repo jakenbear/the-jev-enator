@@ -10,7 +10,7 @@ Writes tests/cassette.json, which CI replays. The recorded scores are a snapshot
 of real model behaviour at one moment: replay proves the plumbing still works,
 not that calibration still holds. That is what the live CI job is for.
 
-How it works: JEV_GATE_RECORD makes jev_client append every (state, questions) ->
+How it works: JEV_RECORD makes jev_client append every (state, questions) ->
 scores it sees to a temp file, keyed the same way replay looks them up. This
 script runs the three suites with that set, then merges what they captured.
 """
@@ -44,10 +44,10 @@ def main() -> int:
 
     env = {
         **os.environ,
-        "JEV_GATE_RECORD": record_path,
+        "JEV_RECORD": record_path,
         "JEV_TEST_CWD": PINNED_CWD,
     }
-    env.pop("JEV_GATE_REPLAY", None)
+    env.pop("JEV_REPLAY", None)
 
     failed = []
     for suite in SUITES:
@@ -81,7 +81,7 @@ def main() -> int:
         json.dumps(
             {
                 "pinned_cwd": PINNED_CWD,
-                "note": "Recorded by tests/record_cassette.py. Replay with JEV_GATE_REPLAY.",
+                "note": "Recorded by tests/record_cassette.py. Replay with JEV_REPLAY.",
                 "responses": dict(sorted(responses.items())),
             },
             indent=2,

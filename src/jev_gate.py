@@ -9,9 +9,12 @@ falls back to its normal permission flow.
 
 Env:
   TYPESAFE_API_KEY       required, else the hook no-ops
-  JEV_GATE_LOG           optional path for a JSONL audit log
-  JEV_GATE_DISABLE       set to 1 to bypass entirely
+  JEV_LOG                optional path for a JSONL audit log
+  JEV_DISABLE            set to 1 to bypass every hook in this repo
   JEV_GATE_EXTRA_TOOLS   comma-separated extra tool names to gate, e.g. MCP tools
+                         (keeps GATE in its name: this one really is gate-only)
+
+The JEV_GATE_* spellings of the shared vars still work. See jev_client.LEGACY_ENV.
 
 Also: `jev_gate.py --matcher` prints the PreToolUse matcher regex, which is how
 install.sh gets it. See GATED_TOOLS.

@@ -38,8 +38,14 @@ if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SETTINGS" 2>/d
   exit 1
 fi
 
+# One variable for the backup path, because the copy and the message that tells
+# you where to find it drifted the moment they were written separately: the file
+# went to .bak-jevenator while the closing line still named .bak-jevgate. A
+# recovery instruction pointing at a file that does not exist is worse than none.
+BACKUP="$SETTINGS.bak-jevenator"
+
 chmod +x "$GATE" "$FINISH" "$NOTICE"
-cp "$SETTINGS" "$SETTINGS.bak-jevgate"
+cp "$SETTINGS" "$BACKUP"
 
 MODE="install"
 [[ "${1:-}" == "--uninstall" ]] && MODE="uninstall"
@@ -68,8 +74,19 @@ if [[ -z "$GATE_MATCHER" ]]; then
   exit 1
 fi
 
+# Ask the client where to log rather than hardcoding a filename, so that a
+# machine with a pre-rename ~/jev-gate.jsonl keeps appending to it. Writing the
+# new name into settings.json for an existing user would leave their history in a
+# file nothing reads again -- and report.sh's totals are the argument for turning
+# enforcement on, so they have to cover everything, not everything since today.
+LOG="$(PYTHONPATH="$REPO/src" python3 -c 'import jev_client; print(jev_client.default_log_path())')"
+if [[ -z "$LOG" ]]; then
+  echo "Could not determine a log path from jev_client.default_log_path()." >&2
+  exit 1
+fi
+
 MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" KEY="$KEY" SETTINGS="$SETTINGS" \
-GATE_MATCHER="$GATE_MATCHER" LOG="$HOME/jev-gate.jsonl" python3 - <<'PY'
+GATE_MATCHER="$GATE_MATCHER" LOG="$LOG" python3 - <<'PY'
 import json, os, pathlib
 
 mode = os.environ["MODE"]
@@ -135,18 +152,24 @@ for event, script, matcher in WIRING:
 
 env = data.setdefault("env", {})
 if mode == "uninstall":
-    for k in ("TYPESAFE_API_KEY", "JEV_GATE_LOG"):
+    # Both spellings, or an uninstall leaves a JEV_GATE_LOG behind that a
+    # reinstall would then silently keep honouring as the fallback.
+    for k in ("TYPESAFE_API_KEY", "JEV_LOG", "JEV_GATE_LOG"):
         env.pop(k, None)
 else:
     env["TYPESAFE_API_KEY"] = os.environ["KEY"]
-    env.setdefault("JEV_GATE_LOG", os.environ["LOG"])
+    # setdefault on both: if JEV_GATE_LOG is already here from a pre-rename
+    # install, adding JEV_LOG next to it would be two names for one setting in
+    # one file, and whichever one someone later edited would appear to do nothing.
+    if "JEV_GATE_LOG" not in env:
+        env.setdefault("JEV_LOG", os.environ["LOG"])
 
 path.write_text(json.dumps(data, indent=2) + "\n")
 print("\n".join(f"  {c}" for c in changed) if changed else "  no change needed")
 PY
 
 echo
-echo "Backup: $SETTINGS.bak-jevgate"
+echo "Backup: $BACKUP"
 echo "Restart Claude Code to apply."
 if [[ "$MODE" == "install" ]]; then
   echo

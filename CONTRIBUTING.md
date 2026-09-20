@@ -28,7 +28,7 @@ Restart Claude Code after installing; `settings.json` is only read at startup.
 can run everything before you've signed up for anything:
 
 ```bash
-export JEV_GATE_REPLAY=tests/cassette.json
+export JEV_REPLAY=tests/cassette.json
 python3 tests/test_jev_gate.py
 python3 tests/test_jev_notice.py
 python3 tests/test_jev_finish.py
@@ -53,7 +53,7 @@ Run all three before opening a PR — the thresholds interact, and it's easy to 
 one case by breaking another.
 
 Each suite logs its classifications to its own temp file and prints the path when
-it finishes — your real `~/jev-gate.jsonl` is untouched. If you add a suite, use
+it finishes — your real `~/jev-enator.jsonl` is untouched. If you add a suite, use
 `tests/fixture_env.py`; pass `env=hook_env(log_path)` to every `subprocess.run`.
 Fixtures are extreme by design, and letting them into the real log destroys the
 score distribution `report.sh` exists to show you.
@@ -68,7 +68,7 @@ This is the highest-value issue you can file. Include:
 
 1. The command or output that was misjudged
 2. What the hook did, and what it should have done
-3. The log line — `grep <something> ~/jev-gate.jsonl | tail -1`
+3. The log line — `grep <something> ~/jev-enator.jsonl | tail -1`
 
 That last one matters most: it has the actual probabilities, so the fix is
 usually obvious from the scores alone.

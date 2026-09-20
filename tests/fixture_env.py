@@ -1,8 +1,8 @@
 """Keep fixture classifications out of the real audit log.
 
-The hooks log through jev_client.log(), which writes to whatever JEV_GATE_LOG
+The hooks log through jev_client.log(), which writes to whatever JEV_LOG
 points at. The test suites invoke those hooks as subprocesses, so without an
-override every fixture lands in the same ~/jev-gate.jsonl as real tool calls.
+override every fixture lands in the same ~/jev-enator.jsonl as real tool calls.
 
 That is not cosmetic. The fixtures are deliberately extreme -- `rm -rf /`, force
 pushes, credentials in source -- so they sit at the top of every score
@@ -27,7 +27,7 @@ PINNED_CWD = "/home/runner/some-project"
 
 
 def replaying() -> bool:
-    return bool(os.environ.get("JEV_GATE_REPLAY"))
+    return bool(os.environ.get("JEV_REPLAY") or os.environ.get("JEV_GATE_REPLAY"))
 
 
 def require_key() -> None:
@@ -37,7 +37,7 @@ def require_key() -> None:
     print(
         "TYPESAFE_API_KEY not set.\n"
         "Either export a key, or run offline against the recorded responses:\n"
-        "  JEV_GATE_REPLAY=tests/cassette.json python3 tests/<suite>.py",
+        "  JEV_REPLAY=tests/cassette.json python3 tests/<suite>.py",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -71,14 +71,19 @@ def hook_env(log_path: str, **extra: str) -> dict:
     os.environ, so a suite that forgets it fails loudly in review instead of
     silently inheriting a redirect from whichever test ran first.
     """
-    env = {**os.environ, "JEV_GATE_LOG": log_path, **extra}
+    env = {**os.environ, "JEV_LOG": log_path, **extra}
+    # Drop the pre-rename name so a redirect cannot leak in from the caller's
+    # own shell: env_var() falls back to it, and a stale JEV_GATE_LOG would send
+    # fixture scores into a real audit log -- the exact bug this module prevents.
+    env.pop("JEV_GATE_LOG", None)
     # Resolve the cassette to an absolute path. Callers naturally pass a
     # repo-relative one, and the hook subprocess does not necessarily inherit a
     # CWD where that resolves -- a miss there reads as "no recording" rather
     # than "wrong path", which is a confusing way to spend an afternoon.
-    replay = env.get("JEV_GATE_REPLAY")
+    replay = env.get("JEV_REPLAY") or env.get("JEV_GATE_REPLAY")
     if replay:
-        env["JEV_GATE_REPLAY"] = os.path.abspath(replay)
+        env.pop("JEV_GATE_REPLAY", None)
+        env["JEV_REPLAY"] = os.path.abspath(replay)
     return env
 
 

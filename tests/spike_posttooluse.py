@@ -11,7 +11,7 @@ the screen. A build prints 200 warnings and one error. Those are exactly the
 outputs an agent skims and declares green.
 
 Run:
-  cd ~/jev-gate && source .env && python3 tests/spike_posttooluse.py
+  cd ~/the-jev-enator && source .env && python3 tests/spike_posttooluse.py
 
 Nothing here touches settings.json. It only prints probabilities.
 """

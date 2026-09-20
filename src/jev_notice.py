@@ -30,9 +30,11 @@ Fails open: any error, timeout, or missing key emits nothing.
 
 Env:
   TYPESAFE_API_KEY   required, else the hook no-ops
-  JEV_GATE_LOG       optional path for a JSONL audit log
-  JEV_GATE_DISABLE   set to 1 to bypass entirely
+  JEV_LOG            optional path for a JSONL audit log
+  JEV_DISABLE        set to 1 to bypass every hook in this repo
   JEV_NOTICE_OFF     set to 1 to disable just this hook
+
+The JEV_GATE_* spellings of the shared vars still work. See jev_client.LEGACY_ENV.
 """
 
 import json

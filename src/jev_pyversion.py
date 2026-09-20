@@ -73,13 +73,16 @@ def require_python():
     message to the user and lets the session continue, which is noisy every call --
     correct for a safety tool that is not currently protecting anything.
 
-    JEV_GATE_DISABLE=1 silences it, on the same principle as everywhere else: the
+    JEV_DISABLE=1 silences it, on the same principle as everywhere else: the
     documented way to turn this repo off must keep working even when it is broken.
+    The old JEV_GATE_DISABLE is honoured too -- the fallback is spelled out here
+    instead of calling jev_client.env_var() because importing jev_client is the
+    thing this module exists to avoid. A test asserts the two lists match.
     """
     why = problem()
     if why is None:
         return
-    if os.environ.get("JEV_GATE_DISABLE") == "1":
+    if os.environ.get("JEV_DISABLE") == "1" or os.environ.get("JEV_GATE_DISABLE") == "1":
         sys.exit(0)
     sys.stderr.write(why + "\n")
     sys.exit(1)

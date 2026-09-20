@@ -306,6 +306,169 @@ def case_rejects_old_python():
         shutil.rmtree(shim, ignore_errors=True)
 
 
+def case_backup_path_is_real():
+    """The backup install.sh names on stdout must be the file it actually wrote.
+
+    These drifted immediately once the rename split them: the copy went to
+    .bak-jevenator while the closing message still said .bak-jevgate. Nobody reads
+    that line until they need it, and then it points at nothing.
+    """
+    home = make_home({"theme": "dark"})
+    try:
+        proc = run(home)
+        named = [
+            line.split("Backup:", 1)[1].strip()
+            for line in proc.stdout.splitlines()
+            if "Backup:" in line
+        ]
+        if not named:
+            return [(False, "install.sh printed no Backup: line")]
+        path = Path(named[0])
+        return [
+            (path.exists(), f"the backup it names exists ({path.name})"),
+            (
+                path.exists() and json.loads(path.read_text()).get("theme") == "dark",
+                "the backup holds the pre-install settings",
+            ),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_fresh_install_log_path():
+    """A machine with no history gets the current filename."""
+    home = make_home({})
+    try:
+        run(home)
+        env = settings_of(home).get("env", {})
+        return [
+            (
+                env.get("JEV_LOG", "").endswith("jev-enator.jsonl"),
+                f"fresh install logs to the current name (got {env.get('JEV_LOG')!r})",
+            ),
+            ("JEV_GATE_LOG" not in env, "no pre-rename name written on a fresh install"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_legacy_log_is_kept():
+    """A pre-rename ~/jev-gate.jsonl must keep being written to.
+
+    Pointing an existing user at the new filename would leave the history they
+    already have in a file nothing reads again. report.sh's totals are the whole
+    argument for turning enforcement on, so they have to cover everything that
+    happened -- not everything since the rename.
+    """
+    home = make_home({})
+    try:
+        legacy = home / "jev-gate.jsonl"
+        legacy.write_text('{"hook":"gate","scores":{}}\n')
+        run(home)
+        env = settings_of(home).get("env", {})
+        return [
+            (
+                env.get("JEV_LOG") == str(legacy),
+                f"existing log kept as the target (got {env.get('JEV_LOG')!r})",
+            ),
+            (legacy.read_text().startswith('{"hook"'), "the existing log was not truncated or moved"),
+            (
+                not (home / "jev-enator.jsonl").exists(),
+                "no second log file created alongside it",
+            ),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_legacy_env_not_duplicated():
+    """A settings.json already carrying JEV_GATE_LOG must not gain JEV_LOG too.
+
+    Two names for one setting in one file is worse than the stale name alone:
+    whichever one the reader later edits would appear to do nothing, because
+    env_var() prefers the other.
+    """
+    home = make_home({"env": {"JEV_GATE_LOG": "/tmp/preexisting-jev.jsonl"}})
+    try:
+        run(home)
+        env = settings_of(home).get("env", {})
+        return [
+            ("JEV_LOG" not in env, "no duplicate JEV_LOG added next to JEV_GATE_LOG"),
+            (
+                env.get("JEV_GATE_LOG") == "/tmp/preexisting-jev.jsonl",
+                "the pre-rename setting is left exactly as the user wrote it",
+            ),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_uninstall_removes_both_spellings():
+    """Uninstall must clear the old name too.
+
+    Leaving JEV_GATE_LOG behind means a later reinstall writes JEV_LOG, sees the
+    stale one still set, and honours whichever env_var() prefers -- logging to a
+    path the reader thought they had removed.
+    """
+    home = make_home({"env": {"JEV_GATE_LOG": "/tmp/preexisting-jev.jsonl"}})
+    try:
+        run(home)
+        run(home, "--uninstall")
+        env = settings_of(home).get("env", {})
+        return [
+            ("JEV_GATE_LOG" not in env, "pre-rename log setting removed by uninstall"),
+            ("JEV_LOG" not in env, "current log setting removed by uninstall"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_legacy_env_fallback():
+    """Every renamed variable still works under its old name.
+
+    This is the promise that keeps the rename from being a silent breakage. A
+    hook that stops logging because a variable was renamed under it produces no
+    error at all -- just an audit trail that quietly ends.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    import jev_client
+
+    results = []
+    for new, old in sorted(jev_client.LEGACY_ENV.items()):
+        probe = f"sentinel-for-{old}"
+        saved = {k: os.environ.get(k) for k in (new, old)}
+        try:
+            os.environ.pop(new, None)
+            os.environ[old] = probe
+            results.append((jev_client.env_var(new) == probe, f"{old} still honoured as {new}"))
+            os.environ[new] = f"wins-{new}"
+            results.append(
+                (jev_client.env_var(new) == f"wins-{new}", f"{new} takes precedence over {old}")
+            )
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    return results
+
+
+def case_disable_fallback_covers_pyversion():
+    """jev_pyversion duplicates the disable fallback; assert it has not drifted.
+
+    It cannot call jev_client.env_var() -- importing jev_client on an old
+    interpreter is precisely what it exists to prevent -- so the JEV_GATE_DISABLE
+    fallback is hardcoded there. A duplicate without a test is a future
+    inconsistency, and this one would leave someone unable to turn the repo off.
+    """
+    src = (REPO / "src" / "jev_pyversion.py").read_text()
+    return [
+        ("JEV_DISABLE" in src, "jev_pyversion honours the current name"),
+        ("JEV_GATE_DISABLE" in src, "jev_pyversion still honours the pre-rename name"),
+    ]
+
+
 def case_brand_not_drifted():
     """jev_pyversion hardcodes the brand; assert it still matches the real one.
 
@@ -331,6 +494,13 @@ CASES = [
     ("uninstall of a shared hook entry", case_shared_entry_uninstall),
     ("broken settings.json is refused", case_rejects_broken_json),
     ("old python3 on PATH is refused", case_rejects_old_python),
+    ("the named backup is the one written", case_backup_path_is_real),
+    ("fresh install uses the current log filename", case_fresh_install_log_path),
+    ("a pre-rename log file keeps being used", case_legacy_log_is_kept),
+    ("a pre-rename env var is not duplicated", case_legacy_env_not_duplicated),
+    ("uninstall clears both spellings", case_uninstall_removes_both_spellings),
+    ("renamed vars still work under their old names", case_legacy_env_fallback),
+    ("disable fallback is mirrored in jev_pyversion", case_disable_fallback_covers_pyversion),
     ("version-guard brand has not drifted", case_brand_not_drifted),
 ]
 

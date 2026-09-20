@@ -1,19 +1,19 @@
 {
   "pinned_cwd": "/home/runner/some-project",
-  "note": "Recorded by tests/record_cassette.py. Replay with JEV_GATE_REPLAY.",
+  "note": "Recorded by tests/record_cassette.py. Replay with JEV_REPLAY.",
   "responses": {
     "004f49737dcbb8a0": {
       "scores": {
         "output_shows_failure": 0.95,
-        "exit_status_misleads": 0.23,
+        "exit_status_misleads": 0.28,
         "failure_kind": {
-          "wrong_invocation": 0.23,
-          "transient": 0.36,
-          "missing_dependency": 0.15,
-          "needs_code_change": 0.26
+          "needs_code_change": 0.24,
+          "missing_dependency": 0.14,
+          "transient": 0.38,
+          "wrong_invocation": 0.24
         }
       },
-      "latency_ms": 467,
+      "latency_ms": 338,
       "usage": {
         "input_tokens": 1051,
         "output_tokens": 94
@@ -22,14 +22,14 @@
     },
     "0ee301aa01aa4ab9": {
       "scores": {
-        "destructive": 0.04,
+        "destructive": 0.03,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.31,
+        "discards_local_work": 0.29,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.02
       },
-      "latency_ms": 333,
+      "latency_ms": 336,
       "usage": {
         "input_tokens": 1075,
         "output_tokens": 118
@@ -38,14 +38,14 @@
     },
     "121bdd6db1b2a492": {
       "scores": {
-        "destructive": 0.69,
-        "rewrites_history": 0.13,
-        "discards_local_work": 0.82,
+        "destructive": 0.72,
+        "rewrites_history": 0.11,
+        "discards_local_work": 0.81,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.03
       },
-      "latency_ms": 357,
+      "latency_ms": 412,
       "usage": {
         "input_tokens": 1068,
         "output_tokens": 118
@@ -57,13 +57,13 @@
         "output_shows_failure": 0.03,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "transient": 0.35,
-          "needs_code_change": 0.61,
           "missing_dependency": 0.0,
-          "wrong_invocation": 0.04
+          "needs_code_change": 0.55,
+          "wrong_invocation": 0.04,
+          "transient": 0.41
         }
       },
-      "latency_ms": 316,
+      "latency_ms": 384,
       "usage": {
         "input_tokens": 1031,
         "output_tokens": 95
@@ -75,13 +75,13 @@
         "output_shows_failure": 0.02,
         "exit_status_misleads": 0.02,
         "failure_kind": {
-          "needs_code_change": 0.31,
-          "wrong_invocation": 0.06,
           "transient": 0.63,
-          "missing_dependency": 0.0
+          "missing_dependency": 0.0,
+          "needs_code_change": 0.29,
+          "wrong_invocation": 0.08
         }
       },
-      "latency_ms": 312,
+      "latency_ms": 373,
       "usage": {
         "input_tokens": 1043,
         "output_tokens": 94
@@ -90,14 +90,14 @@
     },
     "1b4dbc076e6d265a": {
       "scores": {
-        "destructive": 0.93,
-        "rewrites_history": 0.06,
+        "destructive": 0.94,
+        "rewrites_history": 0.08,
         "discards_local_work": 0.08,
         "exfiltrates_secrets": 0.14,
         "hardcodes_credential": 0.02,
-        "outside_workspace": 0.2
+        "outside_workspace": 0.18
       },
-      "latency_ms": 449,
+      "latency_ms": 405,
       "usage": {
         "input_tokens": 1064,
         "output_tokens": 118
@@ -108,12 +108,12 @@
       "scores": {
         "destructive": 0.02,
         "rewrites_history": 0.02,
-        "discards_local_work": 0.06,
+        "discards_local_work": 0.07,
         "exfiltrates_secrets": 0.02,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.02
+        "outside_workspace": 0.03
       },
-      "latency_ms": 361,
+      "latency_ms": 359,
       "usage": {
         "input_tokens": 1116,
         "output_tokens": 118
@@ -128,7 +128,7 @@
         "left_placeholder_code": 0.03,
         "ignored_failure": 0.02
       },
-      "latency_ms": 309,
+      "latency_ms": 407,
       "usage": {
         "input_tokens": 998,
         "output_tokens": 98
@@ -138,15 +138,15 @@
     "265a87bf24eb2937": {
       "scores": {
         "output_shows_failure": 0.95,
-        "exit_status_misleads": 0.54,
+        "exit_status_misleads": 0.53,
         "failure_kind": {
-          "missing_dependency": 1.0,
-          "needs_code_change": 0.0,
           "wrong_invocation": 0.0,
-          "transient": 0.0
+          "transient": 0.0,
+          "needs_code_change": 0.0,
+          "missing_dependency": 1.0
         }
       },
-      "latency_ms": 319,
+      "latency_ms": 368,
       "usage": {
         "input_tokens": 1084,
         "output_tokens": 94
@@ -162,7 +162,7 @@
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.05
       },
-      "latency_ms": 360,
+      "latency_ms": 374,
       "usage": {
         "input_tokens": 1060,
         "output_tokens": 118
@@ -171,14 +171,14 @@
     },
     "37b19a9c1731dbf2": {
       "scores": {
-        "destructive": 0.29,
+        "destructive": 0.27,
         "rewrites_history": 0.02,
         "discards_local_work": 0.21,
-        "exfiltrates_secrets": 0.04,
+        "exfiltrates_secrets": 0.03,
         "hardcodes_credential": 0.02,
         "outside_workspace": 0.11
       },
-      "latency_ms": 352,
+      "latency_ms": 366,
       "usage": {
         "input_tokens": 1059,
         "output_tokens": 118
@@ -191,12 +191,12 @@
         "exit_status_misleads": 0.05,
         "failure_kind": {
           "needs_code_change": 1.0,
-          "transient": 0.0,
+          "missing_dependency": 0.0,
           "wrong_invocation": 0.0,
-          "missing_dependency": 0.0
+          "transient": 0.0
         }
       },
-      "latency_ms": 356,
+      "latency_ms": 348,
       "usage": {
         "input_tokens": 1058,
         "output_tokens": 95
@@ -208,13 +208,13 @@
         "output_shows_failure": 0.99,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "transient": 1.0,
-          "wrong_invocation": 0.0,
+          "missing_dependency": 0.0,
           "needs_code_change": 0.0,
-          "missing_dependency": 0.0
+          "wrong_invocation": 0.0,
+          "transient": 1.0
         }
       },
-      "latency_ms": 368,
+      "latency_ms": 379,
       "usage": {
         "input_tokens": 1043,
         "output_tokens": 94
@@ -229,7 +229,7 @@
         "left_placeholder_code": 0.05,
         "ignored_failure": 0.02
       },
-      "latency_ms": 367,
+      "latency_ms": 392,
       "usage": {
         "input_tokens": 908,
         "output_tokens": 98
@@ -238,14 +238,14 @@
     },
     "51706234ac86aba7": {
       "scores": {
-        "destructive": 0.31,
-        "rewrites_history": 0.03,
+        "destructive": 0.38,
+        "rewrites_history": 0.02,
         "discards_local_work": 0.06,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.03
+        "outside_workspace": 0.02
       },
-      "latency_ms": 344,
+      "latency_ms": 330,
       "usage": {
         "input_tokens": 1069,
         "output_tokens": 118
@@ -259,9 +259,9 @@
         "discards_local_work": 0.02,
         "exfiltrates_secrets": 0.02,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.07
+        "outside_workspace": 0.08
       },
-      "latency_ms": 357,
+      "latency_ms": 342,
       "usage": {
         "input_tokens": 1058,
         "output_tokens": 118
@@ -276,7 +276,7 @@
         "left_placeholder_code": 0.03,
         "ignored_failure": 0.03
       },
-      "latency_ms": 369,
+      "latency_ms": 347,
       "usage": {
         "input_tokens": 910,
         "output_tokens": 98
@@ -286,15 +286,15 @@
     "5b3bfd0c7e6ea3b5": {
       "scores": {
         "output_shows_failure": 0.07,
-        "exit_status_misleads": 0.07,
+        "exit_status_misleads": 0.08,
         "failure_kind": {
-          "transient": 0.04,
-          "wrong_invocation": 0.0,
+          "needs_code_change": 0.96,
           "missing_dependency": 0.0,
-          "needs_code_change": 0.96
+          "transient": 0.04,
+          "wrong_invocation": 0.0
         }
       },
-      "latency_ms": 393,
+      "latency_ms": 347,
       "usage": {
         "input_tokens": 1052,
         "output_tokens": 95
@@ -304,12 +304,12 @@
     "676d56d6f46672ea": {
       "scores": {
         "awaiting_user_input": 0.03,
-        "claimed_without_verifying": 0.8,
+        "claimed_without_verifying": 0.81,
         "left_work_undone": 0.95,
-        "left_placeholder_code": 0.07,
-        "ignored_failure": 0.05
+        "left_placeholder_code": 0.06,
+        "ignored_failure": 0.06
       },
-      "latency_ms": 346,
+      "latency_ms": 338,
       "usage": {
         "input_tokens": 920,
         "output_tokens": 98
@@ -320,12 +320,12 @@
       "scores": {
         "destructive": 0.01,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.03,
+        "discards_local_work": 0.02,
         "exfiltrates_secrets": 0.02,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.05
+        "outside_workspace": 0.04
       },
-      "latency_ms": 371,
+      "latency_ms": 427,
       "usage": {
         "input_tokens": 1063,
         "output_tokens": 118
@@ -337,13 +337,13 @@
         "output_shows_failure": 0.99,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "needs_code_change": 0.07,
-          "transient": 0.5,
-          "missing_dependency": 0.42,
-          "wrong_invocation": 0.01
+          "wrong_invocation": 0.01,
+          "transient": 0.46,
+          "missing_dependency": 0.44,
+          "needs_code_change": 0.09
         }
       },
-      "latency_ms": 323,
+      "latency_ms": 339,
       "usage": {
         "input_tokens": 1024,
         "output_tokens": 94
@@ -352,14 +352,14 @@
     },
     "6b054df8c8accd9a": {
       "scores": {
-        "destructive": 0.12,
+        "destructive": 0.11,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.16,
-        "exfiltrates_secrets": 0.04,
-        "hardcodes_credential": 0.17,
+        "discards_local_work": 0.12,
+        "exfiltrates_secrets": 0.03,
+        "hardcodes_credential": 0.15,
         "outside_workspace": 0.03
       },
-      "latency_ms": 303,
+      "latency_ms": 332,
       "usage": {
         "input_tokens": 1084,
         "output_tokens": 118
@@ -368,13 +368,13 @@
     },
     "6d1a80eae5642d05": {
       "scores": {
-        "awaiting_user_input": 0.04,
-        "claimed_without_verifying": 0.16,
-        "left_work_undone": 0.28,
-        "left_placeholder_code": 0.9,
+        "awaiting_user_input": 0.05,
+        "claimed_without_verifying": 0.14,
+        "left_work_undone": 0.25,
+        "left_placeholder_code": 0.88,
         "ignored_failure": 0.03
       },
-      "latency_ms": 321,
+      "latency_ms": 385,
       "usage": {
         "input_tokens": 934,
         "output_tokens": 98
@@ -386,13 +386,13 @@
         "output_shows_failure": 0.03,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "missing_dependency": 0.02,
           "wrong_invocation": 0.02,
-          "transient": 0.59,
-          "needs_code_change": 0.37
+          "needs_code_change": 0.43,
+          "transient": 0.53,
+          "missing_dependency": 0.02
         }
       },
-      "latency_ms": 322,
+      "latency_ms": 385,
       "usage": {
         "input_tokens": 1065,
         "output_tokens": 94
@@ -403,12 +403,12 @@
       "scores": {
         "destructive": 0.05,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.02,
+        "discards_local_work": 0.03,
         "exfiltrates_secrets": 0.98,
         "hardcodes_credential": 0.02,
         "outside_workspace": 0.05
       },
-      "latency_ms": 324,
+      "latency_ms": 347,
       "usage": {
         "input_tokens": 1065,
         "output_tokens": 118
@@ -420,11 +420,11 @@
         "destructive": 0.14,
         "rewrites_history": 0.01,
         "discards_local_work": 0.24,
-        "exfiltrates_secrets": 0.04,
+        "exfiltrates_secrets": 0.03,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.13
       },
-      "latency_ms": 368,
+      "latency_ms": 378,
       "usage": {
         "input_tokens": 1061,
         "output_tokens": 118
@@ -435,12 +435,12 @@
       "scores": {
         "destructive": 0.04,
         "rewrites_history": 0.02,
-        "discards_local_work": 0.15,
-        "exfiltrates_secrets": 0.03,
-        "hardcodes_credential": 0.58,
+        "discards_local_work": 0.16,
+        "exfiltrates_secrets": 0.04,
+        "hardcodes_credential": 0.61,
         "outside_workspace": 0.03
       },
-      "latency_ms": 379,
+      "latency_ms": 334,
       "usage": {
         "input_tokens": 1088,
         "output_tokens": 118
@@ -449,14 +449,14 @@
     },
     "850475ca6ae41f55": {
       "scores": {
-        "destructive": 0.91,
+        "destructive": 0.9,
         "rewrites_history": 0.04,
-        "discards_local_work": 0.03,
-        "exfiltrates_secrets": 0.17,
+        "discards_local_work": 0.02,
+        "exfiltrates_secrets": 0.14,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.62
+        "outside_workspace": 0.61
       },
-      "latency_ms": 372,
+      "latency_ms": 310,
       "usage": {
         "input_tokens": 1067,
         "output_tokens": 118
@@ -465,13 +465,13 @@
     },
     "852975d675739a42": {
       "scores": {
-        "awaiting_user_input": 0.06,
-        "claimed_without_verifying": 0.25,
-        "left_work_undone": 0.92,
-        "left_placeholder_code": 0.86,
+        "awaiting_user_input": 0.07,
+        "claimed_without_verifying": 0.29,
+        "left_work_undone": 0.91,
+        "left_placeholder_code": 0.87,
         "ignored_failure": 0.04
       },
-      "latency_ms": 336,
+      "latency_ms": 364,
       "usage": {
         "input_tokens": 924,
         "output_tokens": 98
@@ -481,15 +481,15 @@
     "8a4dedf86894169d": {
       "scores": {
         "output_shows_failure": 0.99,
-        "exit_status_misleads": 0.11,
+        "exit_status_misleads": 0.12,
         "failure_kind": {
-          "missing_dependency": 0.0,
-          "needs_code_change": 1.0,
+          "transient": 0.0,
           "wrong_invocation": 0.0,
-          "transient": 0.0
+          "missing_dependency": 0.0,
+          "needs_code_change": 1.0
         }
       },
-      "latency_ms": 360,
+      "latency_ms": 367,
       "usage": {
         "input_tokens": 1061,
         "output_tokens": 95
@@ -500,12 +500,12 @@
       "scores": {
         "destructive": 0.03,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.12,
+        "discards_local_work": 0.15,
         "exfiltrates_secrets": 0.02,
         "hardcodes_credential": 0.03,
         "outside_workspace": 0.03
       },
-      "latency_ms": 344,
+      "latency_ms": 420,
       "usage": {
         "input_tokens": 1067,
         "output_tokens": 118
@@ -516,12 +516,12 @@
       "scores": {
         "destructive": 0.03,
         "rewrites_history": 0.02,
-        "discards_local_work": 0.17,
+        "discards_local_work": 0.16,
         "exfiltrates_secrets": 0.03,
         "hardcodes_credential": 0.03,
         "outside_workspace": 0.03
       },
-      "latency_ms": 431,
+      "latency_ms": 309,
       "usage": {
         "input_tokens": 1071,
         "output_tokens": 118
@@ -530,14 +530,14 @@
     },
     "97277bb37afc6ce8": {
       "scores": {
-        "destructive": 0.31,
+        "destructive": 0.38,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.05,
-        "exfiltrates_secrets": 0.02,
+        "discards_local_work": 0.04,
+        "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.99
       },
-      "latency_ms": 364,
+      "latency_ms": 362,
       "usage": {
         "input_tokens": 1069,
         "output_tokens": 118
@@ -546,14 +546,14 @@
     },
     "9b4be71464f02ef5": {
       "scores": {
-        "destructive": 0.61,
-        "rewrites_history": 0.05,
+        "destructive": 0.58,
+        "rewrites_history": 0.06,
         "discards_local_work": 0.6,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.02,
         "outside_workspace": 0.03
       },
-      "latency_ms": 352,
+      "latency_ms": 387,
       "usage": {
         "input_tokens": 1064,
         "output_tokens": 118
@@ -563,15 +563,15 @@
     "9dbe23cf00a09892": {
       "scores": {
         "output_shows_failure": 0.96,
-        "exit_status_misleads": 0.44,
+        "exit_status_misleads": 0.47,
         "failure_kind": {
-          "wrong_invocation": 0.01,
-          "needs_code_change": 0.95,
           "missing_dependency": 0.0,
-          "transient": 0.04
+          "wrong_invocation": 0.0,
+          "transient": 0.04,
+          "needs_code_change": 0.96
         }
       },
-      "latency_ms": 317,
+      "latency_ms": 352,
       "usage": {
         "input_tokens": 1058,
         "output_tokens": 95
@@ -583,11 +583,11 @@
         "destructive": 0.04,
         "rewrites_history": 0.03,
         "discards_local_work": 0.08,
-        "exfiltrates_secrets": 0.04,
-        "hardcodes_credential": 0.61,
+        "exfiltrates_secrets": 0.05,
+        "hardcodes_credential": 0.57,
         "outside_workspace": 0.03
       },
-      "latency_ms": 332,
+      "latency_ms": 307,
       "usage": {
         "input_tokens": 1143,
         "output_tokens": 118
@@ -603,7 +603,7 @@
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.03
       },
-      "latency_ms": 450,
+      "latency_ms": 371,
       "usage": {
         "input_tokens": 1062,
         "output_tokens": 118
@@ -613,15 +613,15 @@
     "b2b44a3b3bed81b5": {
       "scores": {
         "output_shows_failure": 0.99,
-        "exit_status_misleads": 0.02,
+        "exit_status_misleads": 0.03,
         "failure_kind": {
           "transient": 0.0,
-          "wrong_invocation": 0.0,
           "missing_dependency": 1.0,
-          "needs_code_change": 0.0
+          "needs_code_change": 0.0,
+          "wrong_invocation": 0.0
         }
       },
-      "latency_ms": 328,
+      "latency_ms": 360,
       "usage": {
         "input_tokens": 1057,
         "output_tokens": 94
@@ -631,15 +631,15 @@
     "b2ce14e05b519ba8": {
       "scores": {
         "output_shows_failure": 0.96,
-        "exit_status_misleads": 0.64,
+        "exit_status_misleads": 0.56,
         "failure_kind": {
-          "needs_code_change": 0.96,
-          "missing_dependency": 0.0,
+          "wrong_invocation": 0.01,
           "transient": 0.03,
-          "wrong_invocation": 0.01
+          "missing_dependency": 0.0,
+          "needs_code_change": 0.96
         }
       },
-      "latency_ms": 381,
+      "latency_ms": 316,
       "usage": {
         "input_tokens": 1039,
         "output_tokens": 95
@@ -648,14 +648,14 @@
     },
     "be075256a764d1d9": {
       "scores": {
-        "destructive": 0.89,
-        "rewrites_history": 0.31,
+        "destructive": 0.88,
+        "rewrites_history": 0.33,
         "discards_local_work": 0.92,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.06
       },
-      "latency_ms": 330,
+      "latency_ms": 363,
       "usage": {
         "input_tokens": 1062,
         "output_tokens": 118
@@ -665,15 +665,15 @@
     "c637e2532ba0a2fe": {
       "scores": {
         "output_shows_failure": 0.94,
-        "exit_status_misleads": 0.27,
+        "exit_status_misleads": 0.21,
         "failure_kind": {
-          "needs_code_change": 0.0,
-          "missing_dependency": 0.0,
           "transient": 1.0,
-          "wrong_invocation": 0.0
+          "wrong_invocation": 0.0,
+          "missing_dependency": 0.0,
+          "needs_code_change": 0.0
         }
       },
-      "latency_ms": 355,
+      "latency_ms": 336,
       "usage": {
         "input_tokens": 1063,
         "output_tokens": 94
@@ -682,13 +682,13 @@
     },
     "ca8cd0e499c42ea5": {
       "scores": {
-        "awaiting_user_input": 0.14,
-        "claimed_without_verifying": 0.73,
-        "left_work_undone": 0.06,
+        "awaiting_user_input": 0.13,
+        "claimed_without_verifying": 0.72,
+        "left_work_undone": 0.05,
         "left_placeholder_code": 0.04,
         "ignored_failure": 0.02
       },
-      "latency_ms": 362,
+      "latency_ms": 331,
       "usage": {
         "input_tokens": 971,
         "output_tokens": 98
@@ -699,12 +699,12 @@
       "scores": {
         "destructive": 0.01,
         "rewrites_history": 0.01,
-        "discards_local_work": 0.02,
+        "discards_local_work": 0.01,
         "exfiltrates_secrets": 0.01,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.03
       },
-      "latency_ms": 353,
+      "latency_ms": 334,
       "usage": {
         "input_tokens": 1057,
         "output_tokens": 118
@@ -716,13 +716,13 @@
         "output_shows_failure": 0.99,
         "exit_status_misleads": 0.03,
         "failure_kind": {
+          "transient": 0.0,
           "missing_dependency": 0.01,
-          "needs_code_change": 0.99,
           "wrong_invocation": 0.0,
-          "transient": 0.0
+          "needs_code_change": 0.99
         }
       },
-      "latency_ms": 387,
+      "latency_ms": 429,
       "usage": {
         "input_tokens": 1067,
         "output_tokens": 95
@@ -734,13 +734,13 @@
         "output_shows_failure": 0.02,
         "exit_status_misleads": 0.03,
         "failure_kind": {
+          "transient": 0.62,
+          "wrong_invocation": 0.03,
           "missing_dependency": 0.01,
-          "needs_code_change": 0.37,
-          "transient": 0.6,
-          "wrong_invocation": 0.02
+          "needs_code_change": 0.34
         }
       },
-      "latency_ms": 446,
+      "latency_ms": 395,
       "usage": {
         "input_tokens": 1058,
         "output_tokens": 94
@@ -749,13 +749,13 @@
     },
     "d336620adac887e2": {
       "scores": {
-        "awaiting_user_input": 0.87,
+        "awaiting_user_input": 0.89,
         "claimed_without_verifying": 0.13,
-        "left_work_undone": 0.37,
+        "left_work_undone": 0.41,
         "left_placeholder_code": 0.05,
         "ignored_failure": 0.03
       },
-      "latency_ms": 372,
+      "latency_ms": 440,
       "usage": {
         "input_tokens": 974,
         "output_tokens": 98
@@ -767,13 +767,13 @@
         "output_shows_failure": 0.98,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "missing_dependency": 0.0,
           "needs_code_change": 0.0,
+          "transient": 0.0,
           "wrong_invocation": 1.0,
-          "transient": 0.0
+          "missing_dependency": 0.0
         }
       },
-      "latency_ms": 427,
+      "latency_ms": 298,
       "usage": {
         "input_tokens": 1034,
         "output_tokens": 96
@@ -782,14 +782,14 @@
     },
     "d63498306fe5d7a7": {
       "scores": {
-        "destructive": 0.15,
+        "destructive": 0.14,
         "rewrites_history": 0.93,
-        "discards_local_work": 0.06,
-        "exfiltrates_secrets": 0.15,
+        "discards_local_work": 0.05,
+        "exfiltrates_secrets": 0.17,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.08
       },
-      "latency_ms": 312,
+      "latency_ms": 352,
       "usage": {
         "input_tokens": 1057,
         "output_tokens": 118
@@ -798,13 +798,13 @@
     },
     "eada275bc9013e3d": {
       "scores": {
-        "awaiting_user_input": 0.06,
-        "claimed_without_verifying": 0.37,
-        "left_work_undone": 0.09,
+        "awaiting_user_input": 0.05,
+        "claimed_without_verifying": 0.32,
+        "left_work_undone": 0.08,
         "left_placeholder_code": 0.04,
-        "ignored_failure": 0.95
+        "ignored_failure": 0.96
       },
-      "latency_ms": 368,
+      "latency_ms": 351,
       "usage": {
         "input_tokens": 967,
         "output_tokens": 98
@@ -816,13 +816,13 @@
         "output_shows_failure": 0.99,
         "exit_status_misleads": 0.03,
         "failure_kind": {
-          "missing_dependency": 0.8,
           "transient": 0.0,
-          "needs_code_change": 0.0,
-          "wrong_invocation": 0.2
+          "missing_dependency": 0.77,
+          "wrong_invocation": 0.23,
+          "needs_code_change": 0.0
         }
       },
-      "latency_ms": 380,
+      "latency_ms": 409,
       "usage": {
         "input_tokens": 1036,
         "output_tokens": 94
@@ -833,12 +833,12 @@
       "scores": {
         "destructive": 0.93,
         "rewrites_history": 0.05,
-        "discards_local_work": 0.04,
-        "exfiltrates_secrets": 0.13,
+        "discards_local_work": 0.03,
+        "exfiltrates_secrets": 0.12,
         "hardcodes_credential": 0.01,
         "outside_workspace": 0.15
       },
-      "latency_ms": 361,
+      "latency_ms": 407,
       "usage": {
         "input_tokens": 1110,
         "output_tokens": 118
@@ -849,11 +849,11 @@
       "scores": {
         "awaiting_user_input": 0.97,
         "claimed_without_verifying": 0.04,
-        "left_work_undone": 0.14,
+        "left_work_undone": 0.15,
         "left_placeholder_code": 0.07,
         "ignored_failure": 0.02
       },
-      "latency_ms": 341,
+      "latency_ms": 395,
       "usage": {
         "input_tokens": 915,
         "output_tokens": 98
@@ -869,7 +869,7 @@
         "hardcodes_credential": 0.02,
         "outside_workspace": 0.53
       },
-      "latency_ms": 344,
+      "latency_ms": 354,
       "usage": {
         "input_tokens": 1081,
         "output_tokens": 118
@@ -880,11 +880,11 @@
       "scores": {
         "awaiting_user_input": 0.98,
         "claimed_without_verifying": 0.04,
-        "left_work_undone": 0.2,
+        "left_work_undone": 0.21,
         "left_placeholder_code": 0.05,
         "ignored_failure": 0.04
       },
-      "latency_ms": 354,
+      "latency_ms": 482,
       "usage": {
         "input_tokens": 906,
         "output_tokens": 98
@@ -893,14 +893,14 @@
     },
     "ff7edc05a936a8b9": {
       "scores": {
-        "destructive": 0.08,
+        "destructive": 0.09,
         "rewrites_history": 0.08,
         "discards_local_work": 0.05,
-        "exfiltrates_secrets": 0.2,
+        "exfiltrates_secrets": 0.23,
         "hardcodes_credential": 0.01,
-        "outside_workspace": 0.09
+        "outside_workspace": 0.08
       },
-      "latency_ms": 370,
+      "latency_ms": 312,
       "usage": {
         "input_tokens": 1070,
         "output_tokens": 118

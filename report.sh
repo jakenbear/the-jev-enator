@@ -19,19 +19,28 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
 
-LOG="${JEV_GATE_LOG:-}"
+# Resolution order: the env, then settings.json, then the default. Each step
+# checks the current name and the pre-rename one, because the whole point of the
+# fallback is that someone who never touched their settings.json still gets a
+# report -- "No audit log" on a machine that has been logging all week reads as a
+# broken tool.
+LOG="${JEV_LOG:-${JEV_GATE_LOG:-}}"
 if [[ -z "$LOG" && -f "$SETTINGS" ]]; then
   LOG="$(python3 -c "
 import json,pathlib
-try: print(json.loads(pathlib.Path('$SETTINGS').read_text()).get('env',{}).get('JEV_GATE_LOG',''))
+try:
+    env = json.loads(pathlib.Path('$SETTINGS').read_text()).get('env',{})
+    print(env.get('JEV_LOG') or env.get('JEV_GATE_LOG') or '')
 except Exception: print('')
 " 2>/dev/null)"
 fi
-[[ -z "$LOG" ]] && LOG="$HOME/jev-gate.jsonl"
+if [[ -z "$LOG" ]]; then
+  LOG="$(PYTHONPATH="$REPO/src" python3 -c 'import jev_client; print(jev_client.default_log_path())' 2>/dev/null)"
+fi
 
 if [[ ! -f "$LOG" ]]; then
   echo "No audit log at $LOG" >&2
-  echo "Set JEV_GATE_LOG in the env block of settings.json, then use Claude Code for a while." >&2
+  echo "Set JEV_LOG in the env block of settings.json, then use Claude Code for a while." >&2
   exit 1
 fi
 

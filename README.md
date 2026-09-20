@@ -141,7 +141,7 @@ Get a key at [typesafe.ai](https://typesafe.ai). Pricing is $0.042 per million
 input tokens, output free.
 
 `install.sh` appends to the `PreToolUse`, `PostToolUse`, and `Stop` arrays without touching hooks
-you already have, backs up `settings.json` to `settings.json.bak-jevgate`, and is
+you already have, backs up `settings.json` to `settings.json.bak-jevenator`, and is
 safe to run twice. It can live anywhere — paths are resolved relative to the
 script, so `~/the-jev-enator` is a suggestion, not a requirement.
 
@@ -167,7 +167,7 @@ To remove it:
 ```
 
 That unregisters all three hooks and removes the key and log path it added. Your
-original `settings.json` is at `~/.claude/settings.json.bak-jevgate`.
+original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
 
@@ -305,7 +305,7 @@ per turn.
 ```bash
 export JEV_NOTICE_OFF=1       # failure notice off, others stay on
 export JEV_FINISH_OFF=1       # completion check off, others stay on
-export JEV_GATE_DISABLE=1     # all three off for this shell
+export JEV_DISABLE=1          # all three off for this shell
 ./install.sh --uninstall      # all three off for good
 ```
 
@@ -313,6 +313,37 @@ Or set any of them in the `env` block of `settings.json` to make it persistent.
 
 Since the completion check is log-only by default, `JEV_FINISH_OFF` is mostly for
 when you don't want to spend the tokens.
+
+### ⚙️ Environment variables
+
+| Variable | Read by | What it does |
+| --- | --- | --- |
+| `TYPESAFE_API_KEY` | all three | Required. Without it every hook no-ops. |
+| `JEV_LOG` | all three | Path to the JSONL audit log. Set by `install.sh`. |
+| `JEV_DISABLE` | all three | `1` bypasses every hook in this repo. |
+| `JEV_REPLAY` | all three | Cassette path; runs offline against recorded answers. |
+| `JEV_RECORD` | all three | Appends live answers to a file, for re-recording a cassette. |
+| `JEV_GATE_EXTRA_TOOLS` | gate | Comma-separated extra tool names to gate. Keeps `GATE`: it really is gate-only. |
+| `JEV_NOTICE_OFF` | notice | `1` disables just the failure notice. |
+| `JEV_FINISH_ENFORCE` | finish | `1` lets the completion check block. Default is log-only. |
+| `JEV_FINISH_OFF` | finish | `1` disables just the completion check. |
+
+The first five were `JEV_GATE_*` before, which was wrong rather than merely
+stale — `JEV_GATE_DISABLE` also silenced the notice and the completion check.
+
+**The old names still work.** Every renamed variable falls back to its
+`JEV_GATE_*` spelling, so an existing `settings.json` needs no edit; `verify.sh`
+prints a line when it sees one. Renaming a variable out from under a running
+install would stop the audit log with no error at all — just a trail that quietly
+ends, which is the failure this repo exists to argue against.
+
+The default log path is now `~/jev-enator.jsonl`. **An existing
+`~/jev-gate.jsonl` keeps being used** — `install.sh` writes whichever one is
+already there, and `report.sh` and `verify.sh` look for both. Nothing is moved or
+rewritten, because `report.sh`'s totals are the argument for turning enforcement
+on and they have to cover everything that happened, not everything since the
+rename. If you'd rather start clean, move the old file aside and re-run
+`./install.sh`.
 
 ## 🔍 3. Knowing it's on
 
@@ -384,7 +415,7 @@ The 84.2% above is not a real-world rate: 9 of the 23 fixtures in
 dominate this log. Judge your own number from a log you built by working, not by
 running the suite.
 
-Raw log if you want it: `tail -f ~/jev-gate.jsonl | jq -c '{hook, scores}'`.
+Raw log if you want it: `tail -f ~/jev-enator.jsonl | jq -c '{hook, scores}'`.
 
 ## 🧪 Evaluating the completion check
 
@@ -640,7 +671,7 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
-python3 tests/test_install.py      # 28 assertions on install.sh; no key needed
+python3 tests/test_install.py      # 53 assertions on install.sh; no key needed
 ```
 
 `test_jev_finish.py` builds real transcript JSONL in a temp file per case, so the
@@ -658,7 +689,7 @@ To add a question: add it to `QUESTIONS`, add a human-readable phrase to
 Recorded responses are checked in, so the whole suite runs offline:
 
 ```bash
-JEV_GATE_REPLAY=tests/cassette.json python3 tests/test_jev_gate.py
+JEV_REPLAY=tests/cassette.json python3 tests/test_jev_gate.py
 ```
 
 Free, deterministic, about a second, no account needed. This is what CI runs on
@@ -682,7 +713,7 @@ unchecked, every safe fixture would report PASS while testing nothing at all.
 ## 🔧 Troubleshooting
 
 **Everything is allowed, nothing is ever caught.** A hook is failing open. Check
-the audit log: `tail -3 ~/jev-gate.jsonl`. The most likely cause on macOS is
+the audit log: `tail -3 ~/jev-enator.jsonl`. The most likely cause on macOS is
 `CERTIFICATE_VERIFY_FAILED` — python.org builds ship without a CA bundle wired
 into `urllib`. `jev_client.py` resolves this itself by trying `$SSL_CERT_FILE`,
 then `/etc/ssl/cert.pem`, then the Homebrew bundle, then `certifi`, so if you're
@@ -691,7 +722,7 @@ still seeing it, none of those exist on that machine.
 **`HTTP 401`** means a bad or expired key. **`HTTP 422`** means a malformed
 question definition — check a recent edit to `QUESTIONS`.
 
-**Nothing in the log at all.** `JEV_GATE_LOG` isn't set in the `env` block of
+**Nothing in the log at all.** `JEV_LOG` isn't set in the `env` block of
 `settings.json`, or Claude Code hasn't been restarted since install.
 
 **`"skipped": "could not reconstruct turn"`** from the completion check means it
@@ -703,7 +734,7 @@ Expected on `/compact`, resumed sessions, and subagent turns.
 question's threshold in `BLOCK_AT` or add a `criteria` example covering the false
 case.
 
-**`report.sh` shows fewer calls than expected.** `JEV_GATE_LOG` in `.env` must
+**`report.sh` shows fewer calls than expected.** `JEV_LOG` in `.env` must
 match the one `install.sh` wrote into `settings.json`; if they differ, `cat` one
 onto the other and fix `.env`. Note that the fixture suites deliberately log
 elsewhere — they print their temp path at the end of a run — so a test run adding

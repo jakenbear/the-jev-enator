@@ -59,15 +59,15 @@ jobs:
       - name: Danger gate
         run: python3 tests/test_jev_gate.py
         env:
-          JEV_GATE_REPLAY: tests/cassette.json
+          JEV_REPLAY: tests/cassette.json
       - name: Failure notice
         run: python3 tests/test_jev_notice.py
         env:
-          JEV_GATE_REPLAY: tests/cassette.json
+          JEV_REPLAY: tests/cassette.json
       - name: Completion check
         run: python3 tests/test_jev_finish.py
         env:
-          JEV_GATE_REPLAY: tests/cassette.json
+          JEV_REPLAY: tests/cassette.json
       - name: Installer
         # Runs install.sh against a throwaway HOME. No key and no network, so it
         # belongs in the replay job. This is the only coverage of the code that
@@ -102,12 +102,14 @@ jobs:
             grep -q "THE JEV-ENATOR" /tmp/err || { echo "FAIL: $h gave no branded error"; cat /tmp/err; exit 1; }
             echo "ok  $h refused loudly"
           done
-      - name: JEV_GATE_DISABLE still works when the interpreter is too old
+      - name: JEV_DISABLE still works when the interpreter is too old
         # The documented way to turn this repo off has to keep working even when
         # the repo is broken, or the only escape is uninstalling.
         run: |
+          echo '{}' | JEV_DISABLE=1 python3 src/jev_gate.py
+          echo "ok  JEV_DISABLE honoured on 3.9"
           echo '{}' | JEV_GATE_DISABLE=1 python3 src/jev_gate.py
-          echo "ok  disable honoured on 3.9"
+          echo "ok  pre-rename JEV_GATE_DISABLE honoured on 3.9"
 
   test-live:
     # Only on main and manual runs: costs real money, and a fork PR has no

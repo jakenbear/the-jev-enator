@@ -77,15 +77,84 @@ class JevError(Exception):
     """Any failure that should cause the calling hook to fail open."""
 
 
+# --- Environment ----------------------------------------------------------
+#
+# These four settings are read by all three hooks, so the GATE in their old
+# names was wrong rather than merely stale: JEV_GATE_DISABLE also silences the
+# notice and the completion check, which is not what anyone setting a variable
+# named after the gate would expect. JEV_GATE_EXTRA_TOOLS keeps its name, since
+# it really is gate-only.
+#
+# The old names keep working. Someone whose settings.json says JEV_GATE_LOG
+# would otherwise get a hook that silently stops logging -- no error, just an
+# audit trail that quietly ends, which is the failure this repo exists to argue
+# against. LEGACY_ENV maps new name -> old name.
+LEGACY_ENV = {
+    "JEV_LOG": "JEV_GATE_LOG",
+    "JEV_DISABLE": "JEV_GATE_DISABLE",
+    "JEV_REPLAY": "JEV_GATE_REPLAY",
+    "JEV_RECORD": "JEV_GATE_RECORD",
+}
+
+# Default audit log path, and the pre-rename one. Order matters: readers prefer
+# the new file but must keep finding an existing old one, because a log nobody
+# can find is indistinguishable from a log that was never written.
+LOG_NAME = "jev-enator.jsonl"
+LEGACY_LOG_NAME = "jev-gate.jsonl"
+
+
+def env_var(name: str) -> str | None:
+    """Read a setting by its current name, falling back to the pre-rename one.
+
+    Empty string is treated as unset for the new name so that explicitly
+    clearing JEV_LOG cannot resurrect a stale JEV_GATE_LOG from settings.json --
+    a redirect that came back from the dead would send fixture scores into a
+    real audit log, which is the bug tests/fixture_env.py exists to prevent.
+    """
+    value = os.environ.get(name)
+    if value:
+        return value
+    legacy = LEGACY_ENV.get(name)
+    return os.environ.get(legacy) if legacy else None
+
+
+def legacy_env_in_use() -> list[str]:
+    """Old variable names that are set while their replacement is not.
+
+    verify.sh reports these. A fallback that works but is never mentioned is how
+    a deprecated name outlives the thing it was renamed from.
+    """
+    return sorted(
+        old
+        for new, old in LEGACY_ENV.items()
+        if os.environ.get(old) and not os.environ.get(new)
+    )
+
+
+def default_log_path() -> str:
+    """Where to log when nothing says otherwise.
+
+    An existing pre-rename log wins. Defaulting to the new filename on a machine
+    that already has history would split the trail across two files, and
+    report.sh's totals are the argument for enforcement -- they have to cover
+    everything that happened, not everything since the rename.
+    """
+    home = os.path.expanduser("~")
+    legacy = os.path.join(home, LEGACY_LOG_NAME)
+    if os.path.exists(legacy) and not os.path.exists(os.path.join(home, LOG_NAME)):
+        return legacy
+    return os.path.join(home, LOG_NAME)
+
+
 def disabled() -> bool:
-    return os.environ.get("JEV_GATE_DISABLE") == "1"
+    return env_var("JEV_DISABLE") == "1"
 
 
 def api_key() -> str | None:
     # In replay mode no request is made, so a key would only be a barrier to
     # running the suites. This is what lets CI and a first-time contributor run
     # them with no account at all.
-    if os.environ.get("JEV_GATE_REPLAY"):
+    if env_var("JEV_REPLAY"):
         return os.environ.get("TYPESAFE_API_KEY") or "replay"
     return os.environ.get("TYPESAFE_API_KEY")
 
@@ -129,7 +198,7 @@ def cassette_key(state: str, questions: dict) -> str:
 
 
 def replay_path() -> str | None:
-    return os.environ.get("JEV_GATE_REPLAY") or None
+    return env_var("JEV_REPLAY")
 
 
 def _load_cassette(path: str) -> dict:
@@ -242,7 +311,7 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
     # Recording is a side effect of a normal live call, so what gets recorded is
     # exactly what the suites just ran against -- there is no separate code path
     # that could record something the tests never exercised.
-    record = os.environ.get("JEV_GATE_RECORD")
+    record = env_var("JEV_RECORD")
     if record:
         try:
             with open(record, "a") as fh:
@@ -266,7 +335,7 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
 
 def log(record: dict) -> None:
     """Append one JSONL audit line. Never raises."""
-    path = os.environ.get("JEV_GATE_LOG")
+    path = env_var("JEV_LOG")
     if not path:
         return
     # Stamped here rather than at each call site so no hook can forget it.

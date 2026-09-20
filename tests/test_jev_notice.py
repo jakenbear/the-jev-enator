@@ -11,7 +11,7 @@ injects a warning into ordinary successful output would make the agent second
 guess working code, which is worse than saying nothing.
 
 Usage:
-  cd ~/jev-gate && source .env && python3 tests/test_jev_notice.py
+  cd ~/the-jev-enator && source .env && python3 tests/test_jev_notice.py
 """
 
 import json

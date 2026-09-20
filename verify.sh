@@ -106,7 +106,7 @@ except Exception: print('none')
     ok "live API call blocked a destructive command"
   else
     bad "live API call did not block 'rm -rf /' (got: $DECISION)"
-    note "gate is failing open — set JEV_GATE_LOG and check the error"
+    note "gate is failing open — set JEV_LOG and check the error"
   fi
 
   # 4b. Live round trip through the PostToolUse hook. The output below exits 0
@@ -173,15 +173,39 @@ else
 fi
 
 # 5. Disabled by env?
-if [[ "${JEV_GATE_DISABLE:-}" == "1" ]]; then
-  bad "JEV_GATE_DISABLE=1 is set — gate is bypassed"
+if [[ "${JEV_DISABLE:-}" == "1" || "${JEV_GATE_DISABLE:-}" == "1" ]]; then
+  bad "JEV_DISABLE=1 is set — every hook is bypassed"
 fi
 
-# 6. Recent real traffic.
-LOG="$(python3 -c "
-import json,pathlib
-d=json.loads(pathlib.Path('$SETTINGS').read_text())
-print(d.get('env',{}).get('JEV_GATE_LOG',''))
+# 5b. Pre-rename variable names still in use. Not a failure: they work. But a
+# fallback nobody is told about is how a deprecated name outlives the thing it
+# was renamed from, and the reader is the only one who can update settings.json.
+LEGACY="$(PYTHONPATH="$REPO/src" python3 -c "
+import json, pathlib, os
+import jev_client
+try:
+    env = json.loads(pathlib.Path('$SETTINGS').read_text()).get('env', {})
+except Exception:
+    env = {}
+combined = {**env, **os.environ}
+print(' '.join(sorted(
+    old for new, old in jev_client.LEGACY_ENV.items()
+    if combined.get(old) and not combined.get(new)
+)))
+" 2>/dev/null)"
+if [[ -n "$LEGACY" ]]; then
+  note "using pre-rename names: $LEGACY (still honoured; rename when convenient)"
+fi
+
+# 6. Recent real traffic. Same resolution order as report.sh.
+LOG="$(PYTHONPATH="$REPO/src" python3 -c "
+import json, pathlib
+import jev_client
+try:
+    env = json.loads(pathlib.Path('$SETTINGS').read_text()).get('env', {})
+except Exception:
+    env = {}
+print(env.get('JEV_LOG') or env.get('JEV_GATE_LOG') or jev_client.default_log_path())
 " 2>/dev/null)"
 echo
 if [[ -n "$LOG" && -f "$LOG" ]]; then
@@ -230,7 +254,7 @@ elif errs:
     print(f"  {'errors':18} {len(errs)} historical, none recent")
 PY
 else
-  echo "  no audit log yet (set JEV_GATE_LOG to record one)"
+  echo "  no audit log yet (set JEV_LOG to record one)"
 fi
 
 echo
