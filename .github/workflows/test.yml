@@ -1,0 +1,113 @@
+name: tests
+
+# Two jobs, because the suites answer two different questions.
+#
+# test-replay runs against recorded responses: offline, deterministic, free, and
+# safe on fork PRs where secrets are correctly unavailable. It catches the things
+# that actually regress -- parsing, wiring, crashes, a hook that stops emitting.
+# This is the required check.
+#
+# test-live calls the real API and so can catch calibration drift, which replay
+# by construction cannot. It needs a secret, costs money, and can fail for
+# reasons no contributor controls, so it never gates a PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Byte-compile everything
+        run: python3 -m compileall -q src tests
+      - name: Shell syntax
+        run: |
+          for f in install.sh verify.sh report.sh; do
+            bash -n "$f" && echo "ok  $f"
+          done
+      - name: Hooks must be importable and must not crash on junk input
+        # A hook that dies on import behaves exactly like a hook that approved
+        # everything, because it emits nothing and the harness proceeds. That is
+        # the failure mode most worth a cheap check.
+        run: |
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py; do
+            echo 'not json' | python3 "$h" >/dev/null && echo "ok  $h survives junk stdin"
+          done
+
+  test-replay:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor the annotations require; 3.12 is what most people
+        # have. macOS is included because that is the only platform this was
+        # ever developed on, so Linux is the untested one -- see issue #4.
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Danger gate
+        run: python3 tests/test_jev_gate.py
+        env:
+          JEV_GATE_REPLAY: tests/cassette.json
+      - name: Failure notice
+        run: python3 tests/test_jev_notice.py
+        env:
+          JEV_GATE_REPLAY: tests/cassette.json
+      - name: Completion check
+        run: python3 tests/test_jev_finish.py
+        env:
+          JEV_GATE_REPLAY: tests/cassette.json
+
+  test-live:
+    # Only on main and manual runs: costs real money, and a fork PR has no
+    # secret, so requiring it would mean every outside contribution shows a red
+    # check nobody can fix.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Skip if no key is configured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.TYPESAFE_API_KEY }}" ]; then
+            echo "No TYPESAFE_API_KEY secret set -- skipping the live suite."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Danger gate (live)
+        if: steps.guard.outputs.run == 'true'
+        run: python3 tests/test_jev_gate.py
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      - name: Failure notice (live)
+        if: steps.guard.outputs.run == 'true'
+        run: python3 tests/test_jev_notice.py
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      - name: Completion check (live)
+        if: steps.guard.outputs.run == 'true'
+        run: python3 tests/test_jev_finish.py
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      - name: Note on failure
+        if: failure()
+        run: |
+          echo "A live failure is a calibration signal, not necessarily a bug."
+          echo "A couple of fixtures sit within 0.02 of their threshold and can"
+          echo "flip on a rerun. If it fails twice, look at the threshold."

@@ -24,6 +24,22 @@ Restart Claude Code after installing; `settings.json` is only read at startup.
 
 ## 🧪 Running the tests
 
+**No API key? Run them offline.** The recorded responses are checked in, so you
+can run everything before you've signed up for anything:
+
+```bash
+export JEV_GATE_REPLAY=tests/cassette.json
+python3 tests/test_jev_gate.py
+python3 tests/test_jev_notice.py
+python3 tests/test_jev_finish.py
+```
+
+Free, offline, about a second, and deterministic. This is what CI runs on every
+PR. It proves the plumbing — parsing, wiring, thresholds, that a hook still emits
+what it should. It cannot prove calibration, because the scores are frozen.
+
+With a key, against the live API:
+
 ```bash
 source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
@@ -31,7 +47,7 @@ python3 tests/test_jev_notice.py   # 19 cases: 6 quiet, 13 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
 ```
 
-These hit the live API, so they cost a fraction of a cent and take about a minute.
+These cost a fraction of a cent and take about a minute.
 Run all three before opening a PR — the thresholds interact, and it's easy to fix
 one case by breaking another.
 
@@ -66,6 +82,20 @@ Two rules, both learned the hard way:
 **Add a fixture first.** If you're changing behaviour, there should be a case
 that fails before your change and passes after. A threshold moved without a
 fixture is untested by construction.
+
+**Re-record the cassette.** A new or edited fixture has no recording, so replay
+mode — and therefore CI — will fail with `REPLAY MISS`. Fix it with:
+
+```bash
+source .env && python3 tests/record_cassette.py
+```
+
+Commit the updated `tests/cassette.json` with your change. It needs a live key,
+so if you don't have one, say so in the PR and it can be recorded for you.
+
+A miss is a hard failure on purpose. The hooks fail open, meaning a miss produces
+no output — which is indistinguishable from "allowed this safely." Left
+unchecked, every safe fixture would report PASS while testing nothing.
 
 **Don't move a threshold to fix one case.** Check what else sits near it first.
 `exit_status_misleads` is the live example: the obvious fix for one fixture at

@@ -5,6 +5,7 @@ Standard library only. Every hook in this repo goes through ask_jev(), so TLS
 handling, timeouts, logging, and the fail-open contract live in one place.
 """
 
+import hashlib
 import json
 import os
 import ssl
@@ -41,6 +42,11 @@ def disabled() -> bool:
 
 
 def api_key() -> str | None:
+    # In replay mode no request is made, so a key would only be a barrier to
+    # running the suites. This is what lets CI and a first-time contributor run
+    # them with no account at all.
+    if os.environ.get("JEV_GATE_REPLAY"):
+        return os.environ.get("TYPESAFE_API_KEY") or "replay"
     return os.environ.get("TYPESAFE_API_KEY")
 
 
@@ -63,12 +69,61 @@ def ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
+def cassette_key(state: str, questions: dict) -> str:
+    """Stable id for one (state, questions) pair.
+
+    Hashed rather than stored plainly because states run to thousands of
+    characters and contain absolute paths. Question names are included but not
+    their instruction text: rewording a question should not silently invalidate
+    every recording, since the whole point of a live run is to catch the score
+    change that rewording causes.
+    """
+    payload = state + "\x00" + ",".join(sorted(questions))
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def replay_path() -> str | None:
+    return os.environ.get("JEV_GATE_REPLAY") or None
+
+
+def _load_cassette(path: str) -> dict:
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        # Not a JevError: a broken cassette is a broken test harness, and
+        # failing open here would let CI pass while checking nothing.
+        raise SystemExit(f"jev replay: cannot read {path}: {exc}")
+
+
 def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
     """Return (scores, latency_ms, usage).
 
     scores maps question name -> probability. Raises JevError on any failure so
     the caller can fail open.
     """
+    # Replay mode: serve a recorded response instead of calling the API, so the
+    # suites run offline, deterministically, and without a key. A miss exits
+    # non-zero rather than raising JevError -- fail-open is right for a hook
+    # protecting a real session, and wrong for a test, where it would turn "no
+    # recording for this case" into a silent pass.
+    replay = replay_path()
+    if replay:
+        cassette = _load_cassette(replay)
+        hit = cassette.get("responses", {}).get(cassette_key(state, questions))
+        if hit is None:
+            raise SystemExit(
+                f"jev replay: no recording for this call in {replay}\n"
+                f"  key:       {cassette_key(state, questions)}\n"
+                f"  questions: {', '.join(sorted(questions))}\n"
+                f"  state:     {state[:200]!r}\n"
+                "Re-record with: tests/record_cassette.py"
+            )
+        scores = {k: v for k, v in hit.get("scores", {}).items()}
+        if not scores:
+            raise SystemExit(f"jev replay: recording has no scores for {cassette_key(state, questions)}")
+        return scores, hit.get("latency_ms", 0), hit.get("usage", {})
+
     body = json.dumps({"model": MODEL, "state": state, "questions": questions}).encode()
     req = urllib.request.Request(
         API_URL,
@@ -95,6 +150,29 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
     scores = {k: v.get("noul", 0.0) for k, v in answers.items()}
     if not scores:
         raise JevError("no answers in response")
+
+    # Recording is a side effect of a normal live call, so what gets recorded is
+    # exactly what the suites just ran against -- there is no separate code path
+    # that could record something the tests never exercised.
+    record = os.environ.get("JEV_GATE_RECORD")
+    if record:
+        try:
+            with open(record, "a") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "key": cassette_key(state, questions),
+                            "scores": scores,
+                            "latency_ms": elapsed_ms,
+                            "usage": result.get("usage", {}),
+                            "state_head": state[:300],
+                        }
+                    )
+                    + "\n"
+                )
+        except OSError:
+            pass
+
     return scores, elapsed_ms, result.get("usage", {})
 
 

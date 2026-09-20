@@ -26,9 +26,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "src", "jev_finish.py")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fixture_env import fixture_log, hook_env, report  # noqa: E402
-# Stand-in for a real project directory. Override with JEV_TEST_CWD.
-CWD = os.environ.get("JEV_TEST_CWD", os.path.join(os.path.expanduser("~"), "some-project"))
+from fixture_env import fixture_log, hook_env, replay_miss, report, require_key, test_cwd  # noqa: E402
+# Stand-in for a real project directory. Override with JEV_TEST_CWD; pinned in
+# replay mode -- see fixture_env.test_cwd.
+CWD = test_cwd()
 
 
 def user(text):
@@ -178,9 +179,7 @@ CASES = [
 
 
 def main() -> int:
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        print("TYPESAFE_API_KEY not set", file=sys.stderr)
-        return 1
+    require_key()
 
     log_path = fixture_log("finish")
     failures = 0
@@ -216,6 +215,8 @@ def main() -> int:
             except json.JSONDecodeError:
                 actual, detail = "?", f"unparseable: {out}"
 
+        if replay_miss(proc):
+            actual, detail = "?", "REPLAY MISS -- no recording; re-record the cassette"
         mark = "PASS" if actual == expected else "FAIL"
         if mark == "FAIL":
             failures += 1
@@ -245,7 +246,12 @@ def main() -> int:
         env=env,
     )
     os.unlink(path)
-    if proc.stdout.strip():
+    # This assertion is satisfied by silence, so a cassette miss would "prove"
+    # the log-only default works while the hook never got as far as scoring.
+    if replay_miss(proc):
+        print("FAIL  log-only check hit a replay miss -- re-record the cassette")
+        failures += 1
+    elif proc.stdout.strip():
         print(f"FAIL  log-only default blocked a turn: {proc.stdout.strip()[:120]}")
         failures += 1
     else:

@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(REPO, "src"))
 from jev_notice import KINDS  # noqa: E402  -- assert against the real hint text
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fixture_env import fixture_log, hook_env, report  # noqa: E402
+from fixture_env import fixture_log, hook_env, replay_miss, report, require_key, test_cwd  # noqa: E402
 
 # (label, expected, command, exit_code, output[, kind])
 # expected: "quiet"     -> must inject nothing
@@ -198,9 +198,7 @@ CASES = [
 
 
 def main() -> int:
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        print("TYPESAFE_API_KEY not set", file=sys.stderr)
-        return 1
+    require_key()
 
     log_path = fixture_log("notice")
     failures = 0
@@ -235,6 +233,8 @@ def main() -> int:
         # An emphatic injection satisfies a plain "notice" expectation: both
         # tell the agent not to claim success, which is the behaviour under test.
         ok = actual == expected or (expected == "notice" and actual == "emphatic")
+        if replay_miss(proc):
+            ok, detail = False, "REPLAY MISS -- no recording; re-record the cassette"
 
         kind_note = ""
         if want_kind is None:

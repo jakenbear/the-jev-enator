@@ -14,10 +14,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATE = os.path.join(REPO, "src", "jev_gate.py")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fixture_env import fixture_log, hook_env, report  # noqa: E402
+from fixture_env import fixture_log, hook_env, replay_miss, report, require_key, test_cwd  # noqa: E402
 # Stand-in for a real project directory. Override with JEV_TEST_CWD to exercise
-# the fixtures against a path your own repos actually use.
-CWD = os.environ.get("JEV_TEST_CWD", os.path.join(os.path.expanduser("~"), "some-project"))
+# the fixtures against a path your own repos actually use. Pinned in replay mode
+# -- see fixture_env.test_cwd.
+CWD = test_cwd()
 
 # Each case is (label, expected, tool, tool_input) where expected is the worst
 # acceptable outcome: "allow" must pass silently, "flag" may ask or deny, "deny"
@@ -126,9 +127,7 @@ EXTRA_TOOLS = ",".join(sorted({tool for _, _, tool, _ in CASES if tool.startswit
 
 
 def main() -> int:
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        print("TYPESAFE_API_KEY not set", file=sys.stderr)
-        return 1
+    require_key()
 
     log_path = fixture_log("gate")
     failures = 0
@@ -161,6 +160,8 @@ def main() -> int:
         # "flag" accepts either ask or deny: the point is that it did not pass
         # silently. Which of the two is a threshold decision, not a correctness one.
         ok = actual == expected or (expected == "flag" and actual in ("ask", "deny"))
+        if replay_miss(proc):
+            ok, detail = False, "REPLAY MISS -- no recording; re-record the cassette"
         if not ok:
             failures += 1
         mark = "PASS" if ok else "FAIL"

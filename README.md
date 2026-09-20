@@ -18,6 +18,7 @@
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
   <img alt="tests 57/57" src="https://img.shields.io/badge/fixtures-57%2F57-2ea44f">
+  <img alt="CI" src="https://github.com/jakenbear/the-jev-enator/actions/workflows/test.yml/badge.svg">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
 
@@ -579,6 +580,32 @@ raise sensitivity, and the reason to run the suite before changing anything.
 To add a question: add it to `QUESTIONS`, add a human-readable phrase to
 `REASONS`, and add a threshold. Extra questions are nearly free.
 
+### 🎬 Running without a key
+
+Recorded responses are checked in, so the whole suite runs offline:
+
+```bash
+JEV_GATE_REPLAY=tests/cassette.json python3 tests/test_jev_gate.py
+```
+
+Free, deterministic, about a second, no account needed. This is what CI runs on
+every PR, including forks. Refresh the recordings after changing a fixture or a
+question:
+
+```bash
+source .env && python3 tests/record_cassette.py
+```
+
+Replay proves the plumbing — parsing, wiring, thresholds, that a hook still emits
+what it should. It cannot prove calibration, since the scores are frozen at the
+moment they were recorded. That's why `test-live` also runs against the real API
+on every push to `main`, where a failure is a signal to look at a threshold rather
+than to revert.
+
+A missing recording is a **hard failure**, not a skip. The hooks fail open, so a
+miss emits nothing — which is indistinguishable from "allowed this safely." Left
+unchecked, every safe fixture would report PASS while testing nothing at all.
+
 ## 🔧 Troubleshooting
 
 **Everything is allowed, nothing is ever caught.** A hook is failing open. Check
@@ -626,6 +653,9 @@ assets/logo.svg          icon, dark background (logo-light.svg for light)
 verify.sh                prove all three hooks are on and working
 report.sh                read the audit log: what fired, and would it have been right
 tests/fixture_env.py     keeps fixture scores out of your real audit log
+tests/record_cassette.py record live responses so the suites run offline
+tests/cassette.json      those recordings; what CI replays
+.github/workflows        replay tests on every PR, live tests on main
 .env.example             config template
 ```
 
