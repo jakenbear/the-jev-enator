@@ -37,7 +37,7 @@ jobs:
         # everything, because it emits nothing and the harness proceeds. That is
         # the failure mode most worth a cheap check.
         run: |
-          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py; do
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py; do
             echo 'not json' | python3 "$h" >/dev/null && echo "ok  $h survives junk stdin"
           done
 
@@ -66,6 +66,10 @@ jobs:
           JEV_REPLAY: tests/cassette.json
       - name: Completion check
         run: python3 tests/test_jev_finish.py
+        env:
+          JEV_REPLAY: tests/cassette.json
+      - name: Scope check
+        run: python3 tests/test_jev_scope.py
         env:
           JEV_REPLAY: tests/cassette.json
       - name: Installer
@@ -102,7 +106,7 @@ jobs:
         # Empty stdout matters as much as the exit code: anything printed there
         # that is not a valid decision is a payload Claude Code has to parse.
         run: |
-          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py; do
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py; do
             out="$(echo '{}' | python3 "$h" 2>/tmp/err)" && { echo "FAIL: $h exited 0 on 3.9"; exit 1; }
             [ -z "$out" ] || { echo "FAIL: $h wrote to stdout on 3.9: $out"; exit 1; }
             grep -q "THE JEV-ENATOR" /tmp/err || { echo "FAIL: $h gave no branded error"; cat /tmp/err; exit 1; }
@@ -151,6 +155,11 @@ jobs:
       - name: Completion check (live)
         if: steps.guard.outputs.run == 'true'
         run: python3 tests/test_jev_finish.py
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      - name: Scope check (live)
+        if: steps.guard.outputs.run == 'true'
+        run: python3 tests/test_jev_scope.py
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       - name: Note on failure

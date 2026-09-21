@@ -31,7 +31,12 @@ CASSETTE = TESTS / "cassette.json"
 # pin, a cassette recorded on one machine misses on every other one.
 PINNED_CWD = "/home/runner/some-project"
 
-SUITES = ("test_jev_gate.py", "test_jev_notice.py", "test_jev_finish.py")
+SUITES = (
+    "test_jev_gate.py",
+    "test_jev_notice.py",
+    "test_jev_finish.py",
+    "test_jev_scope.py",
+)
 
 
 def main() -> int:

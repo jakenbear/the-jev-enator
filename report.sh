@@ -273,6 +273,39 @@ def render(s, heading=None):
             print("    ./report.sh --turns")
             print("  Only enable JEV_FINISH_ENFORCE=1 if most of those were right.")
 
+    sc = s.get("scope", {})
+    if sc.get("total"):
+        print()
+        print("=" * 58)
+        print("  SCOPE CHECK  (PreToolUse, log-only always)")
+        print("=" * 58)
+        total = sc["total"]
+        would, explained = sc["would_flag"], sc["explained"]
+        print(f"\n  {total} writes judged\n")
+        for label, n in (
+            ("looked in scope", total - would),
+            ("would have been flagged", would),
+            ("   of those, explained by earlier turns", explained),
+        ):
+            print(f"    {label:38} {n:5}  {100*n/total:5.1f}%  {bar(n, total)}")
+        if sc["reasons"]:
+            print("\n  Why:")
+            for name, n in sc["reasons"].items():
+                print(f"    {name:32} {n}")
+        print(f"\n  median {sc['latency']['median_ms']}ms")
+        # The overlap is the whole evaluation. "The plan" here is the last few
+        # prompts, which is the cheap definition; a flag the conversation already
+        # explains is that definition failing, not scope creep caught.
+        if would:
+            share = 100 * explained / would
+            print(f"\n  {share:.0f}% of flags were already explained by an earlier turn.")
+            if share >= 50:
+                print("  That is the cheap definition of 'the plan' failing, not creep")
+                print("  found. Reading the plan from ExitPlanMode would fix it; see #9.")
+            else:
+                print("  The rest are worth reading: real scope creep, or a question")
+                print("  that needs a 'false' criteria example for your workflow.")
+
     print()
     print("=" * 58)
     print(f"  {s['tokens']} input tokens, ~${s['spend_usd']:.4f} total spend")

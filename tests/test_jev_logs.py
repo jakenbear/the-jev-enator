@@ -66,6 +66,27 @@ FINISH_ROW = {
 }
 
 
+SCOPE_ROW = {
+    "hook": "scope",
+    "tool": "Edit",
+    "cwd": "/Users/jane.doe@corp.example.com/billing-service",
+    "path": "/Users/jane.doe@corp.example.com/billing-service/src/auth/session.ts",
+    "scores": {
+        "outside_stated_scope": 0.95,
+        "unrequested_refactor": 0.10,
+        "unrequested_dependency_change": 0.03,
+        "continuation_ok": 0.05,
+    },
+    "flagged": ["outside_stated_scope"],
+    "explained_by_continuation": False,
+    "verdict": "would_flag",
+    "latency_ms": 341,
+    "usage": {"input_tokens": 980},
+    "state_head": "## What the user asked for\nFix the date formatter in src/utils/date.ts",
+    "ts": "2026-09-20T17:47:10",
+}
+
+
 def write_log(rows, name="alice.jsonl", directory=None):
     directory = directory or Path(tempfile.mkdtemp(prefix="jev-logs-test-"))
     path = Path(directory) / name
@@ -355,6 +376,75 @@ def case_json_is_serialisable():
     return results
 
 
+def case_scope_path_is_redacted():
+    """The scope hook's `path` field is an absolute path, so it is sensitive.
+
+    It is tempting to call a filename harmless. It is not: an absolute path
+    carries the home directory, so the username, and the project name with it.
+    Somebody's repo layout is not mine to publish.
+    """
+    out = jev_logs.redact(SCOPE_ROW)
+    kept = jev_logs.redact(SCOPE_ROW, keep_commands=True)
+    return [
+        ("path" not in out, "path dropped by default"),
+        ("path" not in kept, "path dropped even with --keep-commands"),
+        ("jane.doe" not in json.dumps(out), "the username does not survive via path"),
+        (out["flagged"] == ["outside_stated_scope"], "which question fired still survives"),
+        (out["scores"] == SCOPE_ROW["scores"], "the probabilities survive intact"),
+        (
+            out.get("explained_by_continuation") is False,
+            "explained_by_continuation survives -- it is the false-positive signal",
+        ),
+        (jev_logs.audit([SCOPE_ROW]).get("path") == 1, "audit counts path as something stripped"),
+    ]
+
+
+def case_scope_summary():
+    """would_flag, explained, and the overlap between them.
+
+    The overlap is the number that decides whether the check is worth anything,
+    so a summary that reported it wrong would be worse than not reporting it.
+    """
+    explained = dict(
+        SCOPE_ROW,
+        explained_by_continuation=True,
+        scores={**SCOPE_ROW["scores"], "continuation_ok": 0.91},
+    )
+    quiet = dict(SCOPE_ROW, flagged=[], verdict="in_scope", explained_by_continuation=False)
+    dep = dict(
+        SCOPE_ROW,
+        flagged=["outside_stated_scope", "unrequested_dependency_change"],
+        explained_by_continuation=False,
+    )
+    s = jev_logs.summarize([SCOPE_ROW, explained, quiet, quiet, dep])
+    return [
+        (s["scope"]["total"] == 5, f"all scope records counted (got {s['scope']['total']})"),
+        (s["scope"]["would_flag"] == 3, f"flagged writes counted (got {s['scope']['would_flag']})"),
+        (s["scope"]["explained"] == 1, f"explained-by-continuation counted (got {s['scope']['explained']})"),
+        (
+            s["scope"]["reasons"] == {"outside_stated_scope": 3, "unrequested_dependency_change": 1},
+            f"per-question counts ({s['scope']['reasons']})",
+        ),
+        (s["tokens"] >= 980 * 5, "scope tokens are included in the spend total"),
+        (s["scope"]["latency"]["median_ms"] == 341, "scope latency reported separately"),
+    ]
+
+
+def case_scope_does_not_pollute_other_hooks():
+    """A scope record must not be counted as a gate call.
+
+    Both are PreToolUse and both log `scores`, so the only thing separating them
+    is the `hook` field. Counting scope writes as gate calls would inflate the
+    'passed silently' rate that enforcement decisions are made from.
+    """
+    s = jev_logs.summarize([SCOPE_ROW, GATE_ROW, NOTICE_ROW])
+    return [
+        (s["gate"]["total"] == 1, f"gate total excludes the scope record (got {s['gate']['total']})"),
+        (s["scope"]["total"] == 1, "the scope record is counted once, as scope"),
+        (s["notice"]["total"] == 1, "notice is unaffected"),
+    ]
+
+
 CASES = [
     ("load skips unparseable lines", case_load_skips_garbage),
     ("merging tags sources and drops duplicates", case_merge_tags_and_dedupes),
@@ -370,6 +460,9 @@ CASES = [
     ("summary matches a hand count", case_summary_matches_hand_count),
     ("a choice score does not crash a report", case_choice_score_does_not_crash),
     ("summaries serialise, including empty ones", case_json_is_serialisable),
+    ("the scope hook's path is redacted", case_scope_path_is_redacted),
+    ("scope summary counts flags and the overlap", case_scope_summary),
+    ("scope records are not counted as gate calls", case_scope_does_not_pollute_other_hooks),
 ]
 
 

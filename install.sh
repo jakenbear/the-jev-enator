@@ -14,6 +14,7 @@ SETTINGS="$HOME/.claude/settings.json"
 GATE="$REPO/src/jev_gate.py"
 FINISH="$REPO/src/jev_finish.py"
 NOTICE="$REPO/src/jev_notice.py"
+SCOPE="$REPO/src/jev_scope.py"
 
 # Refuse to install against an interpreter that cannot run the hooks. On 3.9 the
 # annotations in jev_client raise TypeError at import, and a hook that dies on
@@ -74,6 +75,14 @@ if [[ -z "$GATE_MATCHER" ]]; then
   exit 1
 fi
 
+# Same for the scope check, for the same reason.
+SCOPE_MATCHER="$(python3 "$SCOPE" --matcher)"
+if [[ -z "$SCOPE_MATCHER" ]]; then
+  echo "Could not read the watched tool list from $SCOPE --matcher." >&2
+  echo "Refusing to install a hook that matches nothing." >&2
+  exit 1
+fi
+
 # Ask the client where to log rather than hardcoding a filename, so that a
 # machine with a pre-rename ~/jev-gate.jsonl keeps appending to it. Writing the
 # new name into settings.json for an existing user would leave their history in a
@@ -85,8 +94,8 @@ if [[ -z "$LOG" ]]; then
   exit 1
 fi
 
-MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" KEY="$KEY" SETTINGS="$SETTINGS" \
-GATE_MATCHER="$GATE_MATCHER" LOG="$LOG" python3 - <<'PY'
+MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" KEY="$KEY" SETTINGS="$SETTINGS" \
+GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" LOG="$LOG" python3 - <<'PY'
 import json, os, pathlib
 
 mode = os.environ["MODE"]
@@ -97,6 +106,12 @@ WIRING = [
     ("PreToolUse", os.environ["GATE"], os.environ["GATE_MATCHER"]),
     ("PostToolUse", os.environ["NOTICE"], "Bash"),
     ("Stop", os.environ["FINISH"], None),
+    # The scope check gets its own PreToolUse entry rather than sharing the
+    # gate's. Its matcher is the write tools only, and Claude Code applies a
+    # matcher per entry -- sharing one would either run the scope check on every
+    # Bash command (paying for a call it has no useful state for) or narrow the
+    # gate to file writes, which would stop gating Bash entirely.
+    ("PreToolUse", os.environ["SCOPE"], os.environ["SCOPE_MATCHER"]),
 ]
 
 data = json.loads(path.read_text())

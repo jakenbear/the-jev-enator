@@ -29,6 +29,7 @@ INSTALL = REPO / "install.sh"
 GATE = str(REPO / "src" / "jev_gate.py")
 NOTICE = str(REPO / "src" / "jev_notice.py")
 FINISH = str(REPO / "src" / "jev_finish.py")
+SCOPE = str(REPO / "src" / "jev_scope.py")
 
 # A hook belonging to someone else, in the same events this repo installs into.
 # Nothing may ever remove or reorder these.
@@ -469,6 +470,103 @@ def case_disable_fallback_covers_pyversion():
     ]
 
 
+def case_scope_hook_wired_separately():
+    """The scope check needs its own PreToolUse entry with its own matcher.
+
+    Claude Code applies a matcher per entry. Sharing the gate's entry would mean
+    one of two silent breakages: the scope check runs on every Bash command,
+    paying for a call whose state has no file in it, or the gate narrows to file
+    writes and stops gating Bash -- which is most of what it exists for.
+    """
+    home = make_home({})
+    try:
+        run(home)
+        data = settings_of(home)
+        pre = data["hooks"]["PreToolUse"]
+        gate_matcher = subprocess.run(
+            [sys.executable, GATE, "--matcher"], capture_output=True, text=True
+        ).stdout.strip()
+        scope_matcher = subprocess.run(
+            [sys.executable, SCOPE, "--matcher"], capture_output=True, text=True
+        ).stdout.strip()
+        entry_of = {
+            h.get("command"): e.get("matcher")
+            for e in pre
+            for h in e.get("hooks", [])
+        }
+        return [
+            (SCOPE in commands(data, "PreToolUse"), "scope hook wired to PreToolUse"),
+            (bool(scope_matcher), f"--matcher returns a matcher ({scope_matcher!r})"),
+            (
+                entry_of.get(SCOPE) == scope_matcher,
+                f"its entry uses the matcher the hook reports (got {entry_of.get(SCOPE)!r})",
+            ),
+            (
+                entry_of.get(GATE) == gate_matcher,
+                "the gate keeps its own, wider matcher",
+            ),
+            (
+                entry_of.get(SCOPE) != entry_of.get(GATE),
+                "the two do not share an entry, so neither narrows the other",
+            ),
+            ("Bash" not in (entry_of.get(SCOPE) or ""), "the scope check does not fire on Bash"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_scope_matcher_matches_watched_tools():
+    """install.sh must not keep its own copy of the watched-tool list.
+
+    This is the bug from issue #2 repeating: the gate's matcher was hardcoded in
+    install.sh, drifted from GATED_TOOLS, and the tool it omitted was MultiEdit --
+    the one that rewrites many files per call.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    from jev_scope import WATCHED_TOOLS
+
+    reported = subprocess.run(
+        [sys.executable, SCOPE, "--matcher"], capture_output=True, text=True
+    ).stdout.strip()
+    install_src = (REPO / "install.sh").read_text()
+    return [
+        (
+            reported == "|".join(sorted(WATCHED_TOOLS)),
+            f"--matcher is derived from WATCHED_TOOLS ({reported!r})",
+        ),
+        (
+            "MultiEdit" in reported,
+            "MultiEdit is watched -- it is the one that rewrites many files at once",
+        ),
+        (
+            'os.environ["SCOPE_MATCHER"]' in install_src,
+            "install.sh reads the matcher from the hook rather than hardcoding it",
+        ),
+    ]
+
+
+def case_scope_uninstall_removes_only_itself():
+    """Uninstalling must take the scope entry and leave the gate's alone.
+
+    Two of our own commands now live in PreToolUse. The removal loop matches on
+    command path, so this asserts the obvious failure -- clearing the event and
+    taking the gate with it -- cannot happen.
+    """
+    home = make_home({"hooks": {"PreToolUse": [FOREIGN_PRE]}})
+    try:
+        run(home)
+        run(home, "--uninstall")
+        data = settings_of(home)
+        pre = commands(data, "PreToolUse")
+        return [
+            (SCOPE not in pre, "scope hook removed"),
+            (GATE not in pre, "gate removed"),
+            ("/opt/corp/audit-hook.sh" in pre, "foreign PreToolUse hook survived both removals"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 def case_brand_not_drifted():
     """jev_pyversion hardcodes the brand; assert it still matches the real one.
 
@@ -502,6 +600,9 @@ CASES = [
     ("renamed vars still work under their old names", case_legacy_env_fallback),
     ("disable fallback is mirrored in jev_pyversion", case_disable_fallback_covers_pyversion),
     ("version-guard brand has not drifted", case_brand_not_drifted),
+    ("scope hook gets its own PreToolUse entry", case_scope_hook_wired_separately),
+    ("scope matcher is derived, not hardcoded", case_scope_matcher_matches_watched_tools),
+    ("uninstall removes the scope hook and not the gate", case_scope_uninstall_removes_only_itself),
 ]
 
 

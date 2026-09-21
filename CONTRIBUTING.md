@@ -32,6 +32,7 @@ export JEV_REPLAY=tests/cassette.json
 python3 tests/test_jev_gate.py
 python3 tests/test_jev_notice.py
 python3 tests/test_jev_finish.py
+python3 tests/test_jev_scope.py
 ```
 
 Free, offline, about a second, and deterministic. This is what CI runs on every
@@ -45,8 +46,9 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
+python3 tests/test_jev_scope.py    # 13 cases: 8 in scope, 5 out of scope
 python3 tests/test_install.py      # 53 assertions on install.sh; no key needed
-python3 tests/test_jev_logs.py     # 63 assertions on log merging and redaction
+python3 tests/test_jev_logs.py     # 79 assertions on log merging and redaction
 ```
 
 These cost a fraction of a cent and take about a minute.
@@ -141,6 +143,13 @@ in the loop beats rewording it.
 
 Ship anything that depends on intent as log-only, and let the log decide whether
 it earns enforcement. `report.sh` exists for exactly this.
+
+**A hook that emits nothing needs its test to read the log.** `jev_scope.py`
+never prints a decision, so a suite asserting on stdout would pass identically
+whether the hook classified correctly or crashed on import — which is this
+repo's core failure mode wearing a green checkmark. `tests/test_jev_scope.py`
+asserts on the `flagged` list in the log record instead, and fails a case that
+produced no record at all.
 
 ## 🎨 Style
 

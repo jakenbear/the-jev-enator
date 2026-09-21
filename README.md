@@ -17,7 +17,7 @@
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-2ea44f">
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
-  <img alt="tests 58/58" src="https://img.shields.io/badge/fixtures-58%2F58-2ea44f">
+  <img alt="tests 71/71" src="https://img.shields.io/badge/fixtures-71%2F71-2ea44f">
   <img alt="CI" src="https://github.com/jakenbear/the-jev-enator/actions/workflows/test.yml/badge.svg">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
@@ -26,16 +26,22 @@
 calibrated judgement calls **inside the agent loop** — where a full LLM call would
 be too slow and too expensive to sit in the hot path.
 
-### 🎯 Three hooks so far
+### 🎯 Four hooks so far
 
 | | Hook | Event | What it does | Default |
 | :-: | --- | --- | --- | --- |
 | 🛡️ | **danger gate** | `PreToolUse` | Blocks destructive tool calls before they run | 🔴 **enforcing** |
 | 🔔 | **failure notice** | `PostToolUse` | Tells the agent when command output contains a failure | 🔴 **enforcing** |
 | ✅ | **completion check** | `Stop` | Judges whether Claude actually finished its turn | 🟡 **log-only** |
+| 🔍 | **scope check** | `PreToolUse` | Notes when a write isn't part of what you asked for | ⚪ **log-only, always** |
 
-The first two stop bad things. The middle one is the only one that makes the
-agent *better*, and it's the most interesting of the three.
+The first two stop bad things. The failure notice is the only one that makes the
+agent *better*, and it's the most interesting of the four.
+
+⚪ **The scope check has no enforcing mode.** Not a default awaiting a flag —
+there is no flag. It answers "did anyone ask for this," which is the scope-creep
+complaint, and the cost of a wrong answer is nagging someone about a legitimate
+edit. Whether the signal is good enough to act on is a question for the log.
 
 > ⚡ **Why this is possible at all:** Jev isn't a chat model. It returns calibrated
 > probabilities on typed yes/no questions instead of generating text — so each
@@ -92,6 +98,12 @@ Honest status, so you can decide whether to trust it:
 - **Completion check** — unproven, which is why it ships log-only. Its fixtures
   were written by the same author as the questions they test, so they demonstrate
   the plumbing and nothing about real-world accuracy.
+- **Scope check** — newest and least proven. 13/13 fixtures with a clean gap
+  (legitimate edits ≤0.24 on `outside_stated_scope`, unrequested ones ≥0.79), but
+  zero real traffic, and it depends on a deliberately cheap definition of "the
+  plan": the last few user messages. It cannot block, so the worst case is a log
+  line you disagree with. `./report.sh` prints how often its own flags were
+  already explained by an earlier turn — that number is the evaluation.
 
 None of them has been validated across a team yet. If you're the second person to run
 this, read [Tune it on yourself first](#-tune-it-on-yourself-first).
@@ -717,6 +729,52 @@ blocking question, seeded failures 0.81–0.95 — but those fixtures are synthe
 Treat the thresholds as a starting point to validate against your own log, not as
 a calibrated result.
 
+### 🔍 Scope check — `src/jev_scope.py`
+
+The danger gate catches *destructive* actions. This catches the far more common
+failure: an agent asked to fix one function that quietly refactors four files,
+renames a config key, or "while I'm here" bumps a dependency. Nothing in that is
+dangerous. It's all just not what was asked.
+
+| Question | flags at | why that number |
+| --- | --- | --- |
+| `outside_stated_scope` | 0.75 | legitimate edits scored ≤0.24 across 13 fixtures |
+| `unrequested_refactor` | **0.50** | see below |
+| `unrequested_dependency_change` | 0.70 | manifest edits are unambiguous when they happen |
+| `continuation_ok` | — | not a flag; records whether the conversation explains it |
+
+`unrequested_refactor` sits lower than the rest, and that number came from the
+fixture distribution rather than from copying its neighbours. Across 13 fixtures
+it scored 0.03–0.21 on every legitimate edit and 0.56 / 0.72 on the two real
+unrequested refactors — a 0.35 gap, the widest in the set. At 0.75 both real
+refactors scored *under* the bar. It reads lower than the others because it's a
+narrower claim: "is this restructuring working code" is a judgment about intent
+behind a diff that also plausibly reads as ordinary editing.
+
+**Where "the plan" comes from: the last three user messages.** That's the cheap
+version, and the tradeoff is explicit — a task where approval came five messages
+ago looks unrequested on this turn's prompt alone. So `continuation_ok` is asked
+separately, and the log records both halves:
+
+```
+  SCOPE CHECK  (PreToolUse, log-only always)
+
+  7 writes judged
+
+    looked in scope                            3   42.9%  ##########..............
+    would have been flagged                    4   57.1%  ##############..........
+       of those, explained by earlier turns     1   14.3%  ###.....................
+
+  25% of flags were already explained by an earlier turn.
+```
+
+**That overlap is the evaluation.** A flag the conversation already explains is
+the cheap definition of "the plan" failing, not scope creep caught. If most flags
+land there, the fix is reading the plan from `ExitPlanMode` — which this hook
+can't see today — rather than moving a threshold.
+
+Turn it off on its own with `JEV_SCOPE_OFF=1`; the other three keep running.
+
 ### 🎛️ Tuning
 
 Edit the thresholds or `QUESTIONS` criteria, then run the matching fixtures:
@@ -726,8 +784,9 @@ source .env
 python3 tests/test_jev_gate.py     # 26 cases: 15 safe, 11 dangerous, + a wiring check
 python3 tests/test_jev_notice.py   # 20 cases: 6 quiet, 14 failures
 python3 tests/test_jev_finish.py   # 12 cases: 7 legitimate, 5 early stops
+python3 tests/test_jev_scope.py    # 13 cases: 8 in scope, 5 out of scope
 python3 tests/test_install.py      # 53 assertions on install.sh; no key needed
-python3 tests/test_jev_logs.py     # 63 assertions on log merging and redaction
+python3 tests/test_jev_logs.py     # 79 assertions on log merging and redaction
 ```
 
 `test_jev_finish.py` builds real transcript JSONL in a temp file per case, so the
@@ -804,9 +863,11 @@ src/jev_pyversion.py     refuses to run on a Python too old to import the rest
 src/jev_gate.py          PreToolUse  — danger gate (enforcing)
 src/jev_notice.py        PostToolUse — failure notice (enforcing, injects text)
 src/jev_finish.py        Stop        — completion check (log-only)
+src/jev_scope.py         PreToolUse  — scope check (log-only, no enforcing mode)
 tests/test_jev_gate.py   26 fixture payloads, 15 safe and 11 dangerous
 tests/test_jev_notice.py 20 command outputs, 6 clean and 14 containing failures
 tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stops
+tests/test_jev_scope.py  13 pending writes, 8 in scope and 5 out of it (reads the log)
 tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 install.sh               wire into / out of settings.json

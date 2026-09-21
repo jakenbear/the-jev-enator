@@ -23,8 +23,9 @@ WHAT A LOG RECORD CONTAINS, and why redaction is allowlist-based:
     command        "curl -H 'Authorization: Bearer ey...'"    YES
     state_head     300 chars of command text or file content  YES
     request_head   the human's actual prompt                  YES
+    path           "/Users/jane.doe@corp.com/svc/billing.py"  YES
 
-The last four are the entire value of the log for debugging a bad call and the
+The last five are the entire value of the log for debugging a bad call and the
 entire reason you cannot hand one to a coworker. So the default is an allowlist:
 a field is dropped unless it is named safe. You cannot enumerate every shape a
 secret takes -- an internal hostname, a customer name in a prompt, a bearer token
@@ -61,6 +62,7 @@ SAFE_FIELDS = frozenset(
         "allowed",
         "skipped",
         "state_chars",
+        "explained_by_continuation",
         "ts",
     }
 )
@@ -69,7 +71,11 @@ SAFE_FIELDS = frozenset(
 # a named set rather than "everything not in SAFE_FIELDS" so that a field added
 # to a hook later is dropped by default instead of silently shipped: a new key
 # nobody classified is exactly how a leak gets introduced by an unrelated commit.
-SENSITIVE_FIELDS = frozenset({"cwd", "command", "state_head", "request_head"})
+#
+# `path` is here and not in SAFE_FIELDS on purpose. It is only a filename, but it
+# is an absolute one -- it carries the home directory, so the username, and the
+# project name along with it. Somebody's repo layout is not mine to publish.
+SENSITIVE_FIELDS = frozenset({"cwd", "command", "state_head", "request_head", "path"})
 
 # 'error' is its own case. The text is ours, but an exception message can quote a
 # URL or a path, so it is truncated rather than trusted or dropped -- an error
@@ -324,6 +330,7 @@ def split(rows: list[dict]) -> dict:
         "gate": [r for r in rows if r.get("hook") == "gate" and "scores" in r],
         "notice": [r for r in rows if r.get("hook") == "notice" and "scores" in r],
         "finish": [r for r in rows if r.get("hook") == "finish" and "verdict" in r],
+        "scope": [r for r in rows if r.get("hook") == "scope" and "scores" in r],
         "errors": [r for r in rows if "error" in r],
         "legacy": [r for r in rows if "scores" in r and "hook" not in r],
     }
@@ -359,9 +366,10 @@ def summarize(rows: list[dict]) -> dict:
     """
     groups = split(rows)
     gate, notice, finish = groups["gate"], groups["notice"], groups["finish"]
+    scope = groups["scope"]
     tokens = sum(
         r.get("usage", {}).get("input_tokens", 0)
-        for r in gate + notice + finish + groups["legacy"]
+        for r in gate + notice + finish + scope + groups["legacy"]
     )
 
     sources = _counter(r["source"] for r in rows if r.get("source"))
@@ -412,6 +420,17 @@ def summarize(rows: list[dict]) -> dict:
             "flagged": _counter(name for r in finish for name in r.get("flagged", [])),
             "enforcing": len([r for r in finish if r.get("enforcing")]),
             "latency": _latency(finish),
+        },
+        "scope": {
+            "total": len(scope),
+            "would_flag": len([r for r in scope if r.get("flagged")]),
+            # The overlap is the number that decides whether this check is worth
+            # anything: a flag that the conversation already explains is a false
+            # positive of the cheap "the plan is the last prompt" definition, not
+            # a finding. If most flags land here, the definition is what is wrong.
+            "explained": len([r for r in scope if r.get("explained_by_continuation")]),
+            "reasons": _counter(name for r in scope for name in r.get("flagged", [])),
+            "latency": _latency(scope),
         },
     }
 
