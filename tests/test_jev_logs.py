@@ -473,18 +473,69 @@ def case_synthetic_records_are_excluded():
         "cwd": "/Users/jane.doe@corp.example.com/billing-service",
     }
 
-    rows = [FINISH_ROW, fixture_run, ci_run, probe, real_but_similar]
+    # The Stop probe was the only one this filter knew about at first, so the gate
+    # and notice probes below were still counted as real traffic -- and they are
+    # the loudest records in the log, because both are built to be caught. 34 of
+    # a reported 62 gate blocks were this one command.
+    gate_probe = {
+        "hook": "gate",
+        "cwd": "/Users/jane.doe@corp.example.com",
+        "state_head": (
+            "Working directory: /Users/jane.doe@corp.example.com\n\nTool: Bash\n\n"
+            "Command:\nrm -rf / --no-preserve-root\n\nStated purpose: cleanup"
+        ),
+        "scores": {"destructive": 0.98},
+    }
+    notice_probe = {
+        "hook": "notice",
+        "command": "npm test 2>&1 | tail -3",
+        "scores": {"output_shows_failure": 0.97},
+        "noticed": True,
+    }
+    # Full-command equality, not substring. Someone really does run `npm test`,
+    # and a command that merely CONTAINS the probe text -- grepping for it,
+    # writing it into a test, discussing it -- is real work being done on this
+    # repo. Both of these must survive.
+    real_npm_test = {
+        "hook": "notice",
+        "command": "npm test",
+        "scores": {"output_shows_failure": 0.9},
+        "noticed": True,
+    }
+    real_mentions_probe = {
+        "hook": "gate",
+        "cwd": "/Users/jane.doe@corp.example.com/the-jev-enator",
+        "state_head": (
+            "Working directory: /Users/jane.doe@corp.example.com/the-jev-enator\n\n"
+            "Tool: Bash\n\nCommand:\ngrep -rn 'rm -rf / --no-preserve-root' verify.sh"
+            "\n\nStated purpose: find the probe"
+        ),
+        "scores": {"destructive": 0.04},
+    }
+
+    rows = [FINISH_ROW, fixture_run, ci_run, probe, real_but_similar,
+            gate_probe, notice_probe, real_npm_test, real_mentions_probe]
     kept, dropped = jev_logs.drop_synthetic(rows)
-    kept_heads = [r["request_head"] for r in kept]
+    kept_heads = [r.get("request_head") for r in kept if r.get("request_head")]
 
     return [
-        (dropped == 3, f"three synthetic records dropped (got {dropped})"),
+        (dropped == 5, f"five synthetic records dropped (got {dropped})"),
         (jev_logs.is_synthetic(fixture_run), "a pinned fixture cwd is synthetic"),
         (jev_logs.is_synthetic(ci_run), "the CI runner's pinned cwd is synthetic too"),
-        (jev_logs.is_synthetic(probe), "a verify.sh probe payload is synthetic"),
+        (jev_logs.is_synthetic(probe), "a verify.sh Stop probe is synthetic"),
+        (jev_logs.is_synthetic(gate_probe), "the verify.sh gate probe is synthetic"),
+        (jev_logs.is_synthetic(notice_probe), "the verify.sh notice probe is synthetic"),
         (
             not jev_logs.is_synthetic(real_but_similar),
             "a real turn whose text resembles a fixture is KEPT",
+        ),
+        (
+            not jev_logs.is_synthetic(real_npm_test),
+            "a real `npm test` is KEPT (probe match is the whole command)",
+        ),
+        (
+            not jev_logs.is_synthetic(real_mentions_probe),
+            "a real command that only MENTIONS the probe is KEPT",
         ),
         (
             "Deploy to staging." in kept_heads and FINISH_ROW["request_head"] in kept_heads,

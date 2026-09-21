@@ -373,6 +373,38 @@ SYNTHETIC_CWDS = ("/some-project",)
 # and exact for that reason, and checked against $HOME-level records only.
 VERIFY_PROBE_REQUESTS = ("Fix the failing test in src/utils.",)
 
+# The Stop probe above was the only one this filter knew about at first, which
+# left the other two live probes counted as real activity. The cost of that gap
+# was a headline number that was wrong by more than half: 62 gate blocks, of
+# which 34 were this repo asking itself whether `rm -rf /` is destructive.
+#
+# Full-command equality, not a substring. A person really can run `npm test`, and
+# `rm -rf /` appearing anywhere inside a longer command is not evidence of a
+# probe -- it could be the string being discussed, grepped for, or written into a
+# test. Only the exact command verify.sh constructs counts, so these must be kept
+# character-identical to check 4 in verify.sh.
+VERIFY_PROBE_COMMANDS = (
+    "rm -rf / --no-preserve-root",
+    "npm test 2>&1 | tail -3",
+)
+
+
+def _probe_command(row: dict) -> bool:
+    """True if this row's command is exactly one verify.sh sends.
+
+    The gate logs the command inside a rendered `state_head` block rather than a
+    field of its own, so it is read back out of the "Command:" section. Anchored
+    to the whole line: a command that merely mentions one of these is real work.
+    """
+    command = row.get("command")
+    if command is None:
+        head = str(row.get("state_head") or "")
+        if "Command:" not in head:
+            return False
+        # Everything up to the trailing "Stated purpose:" the gate appends.
+        command = head.split("Command:", 1)[1].split("Stated purpose:", 1)[0]
+    return str(command).strip() in VERIFY_PROBE_COMMANDS
+
 
 def is_synthetic(row: dict) -> bool:
     """True if this record came from a fixture run or a verify.sh probe.
@@ -385,7 +417,9 @@ def is_synthetic(row: dict) -> bool:
     if any(marker in cwd for marker in SYNTHETIC_CWDS):
         return True
     head = str(row.get("request_head") or "")
-    return any(probe == head.strip() for probe in VERIFY_PROBE_REQUESTS)
+    if any(probe == head.strip() for probe in VERIFY_PROBE_REQUESTS):
+        return True
+    return _probe_command(row)
 
 
 def drop_synthetic(rows: list[dict]) -> tuple[list[dict], int]:
