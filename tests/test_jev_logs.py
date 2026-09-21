@@ -445,8 +445,61 @@ def case_scope_does_not_pollute_other_hooks():
     ]
 
 
+def case_synthetic_records_are_excluded():
+    """Fixture and verify.sh records must not be counted as real traffic.
+
+    This is issue #1's other half. That issue was about the test suites logging
+    into the real audit log; it was fixed for tests/, and verify.sh -- which runs
+    the same hooks on the same invented payloads -- was not covered, so it kept
+    writing. 89 such records were already in a real log, and because every
+    synthetic payload is engineered to be a clear block, the bias was one-way:
+
+        as logged:  100 of 248 turns flagged = 40.3%
+        real only:   24 of 157 turns flagged = 15.3%
+
+    A reader seeing 40% concludes the completion check is far too chatty to
+    enforce, from its own test data.
+    """
+    fixture_run = {**FINISH_ROW, "cwd": "/Users/jane.doe@corp.example.com/some-project"}
+    ci_run = {**FINISH_ROW, "cwd": "/home/runner/some-project"}
+    probe = {**FINISH_ROW, "request_head": "Fix the failing test in src/utils."}
+    # The fixtures also say "Deploy to staging." and "What does the usage module
+    # do?", which are things a person genuinely says. Matching those as prose
+    # would delete real evidence to make a number look better -- a worse bug than
+    # the one being fixed -- so only a cwd tell or an exact probe match counts.
+    real_but_similar = {
+        **FINISH_ROW,
+        "request_head": "Deploy to staging.",
+        "cwd": "/Users/jane.doe@corp.example.com/billing-service",
+    }
+
+    rows = [FINISH_ROW, fixture_run, ci_run, probe, real_but_similar]
+    kept, dropped = jev_logs.drop_synthetic(rows)
+    kept_heads = [r["request_head"] for r in kept]
+
+    return [
+        (dropped == 3, f"three synthetic records dropped (got {dropped})"),
+        (jev_logs.is_synthetic(fixture_run), "a pinned fixture cwd is synthetic"),
+        (jev_logs.is_synthetic(ci_run), "the CI runner's pinned cwd is synthetic too"),
+        (jev_logs.is_synthetic(probe), "a verify.sh probe payload is synthetic"),
+        (
+            not jev_logs.is_synthetic(real_but_similar),
+            "a real turn whose text resembles a fixture is KEPT",
+        ),
+        (
+            "Deploy to staging." in kept_heads and FINISH_ROW["request_head"] in kept_heads,
+            f"both real records survive ({kept_heads})",
+        ),
+        (
+            jev_logs.summarize(kept)["finish"]["total"] == 2,
+            "the summary counts only the real turns",
+        ),
+    ]
+
+
 CASES = [
     ("load skips unparseable lines", case_load_skips_garbage),
+    ("fixture and probe records are excluded", case_synthetic_records_are_excluded),
     ("merging tags sources and drops duplicates", case_merge_tags_and_dedupes),
     ("per-source summaries keep machines distinct", case_by_source_separates_machines),
     ("--since excludes unstamped records", case_since_excludes_unstamped),

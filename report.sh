@@ -115,6 +115,10 @@ by_source = os.environ.get("BY_SOURCE") == "1" or len(paths) > 1
 
 rows = jev_logs.load_many(paths)
 total_before = len(rows)
+# Before any counting. These are this repo's own fixture and verify.sh payloads,
+# and they are all engineered to be clear blocks -- leaving them in reported the
+# completion check as flagging 40.3% of turns when its real rate is 15.3%.
+rows, synthetic = jev_logs.drop_synthetic(rows)
 if since:
     rows = jev_logs.since(rows, since)
 
@@ -125,7 +129,8 @@ if as_json:
     out = {
         "logs": paths,
         "since": since or None,
-        "excluded_by_since": total_before - len(rows),
+        "excluded_by_since": total_before - synthetic - len(rows),
+        "excluded_synthetic": synthetic,
         "summary": jev_logs.summarize(rows),
     }
     if by_source:
@@ -136,8 +141,16 @@ if as_json:
 finish = jev_logs.split(rows)["finish"]
 
 if since:
-    print(f"\n  since {since}: {len(rows)} of {total_before} records "
-          f"({total_before - len(rows)} older or unstamped, excluded)")
+    print(f"\n  since {since}: {len(rows)} of {total_before - synthetic} records "
+          f"({total_before - synthetic - len(rows)} older or unstamped, excluded)")
+
+# Said out loud. A filter that quietly improves the numbers is the same class of
+# problem as the pollution it corrects: the reader cannot audit what they are not
+# told about, and "why does this say 2751 when the file has 2842 lines" should
+# have an answer on screen.
+if synthetic:
+    print(f"\n  excluded {synthetic} synthetic records "
+          "(this repo's own fixtures and verify.sh probes)")
 
 if len(paths) > 1:
     sources = jev_logs.summarize(rows)["sources"]

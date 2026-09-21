@@ -94,10 +94,33 @@ else
   note "the hook does not inherit your shell, so it must be set there"
 fi
 
+# The live probes below run synthetic payloads through the real hooks, which means
+# they produce real log records for work nobody did. Send them somewhere
+# disposable.
+#
+# This is issue #1 coming back through a different door. That issue was about the
+# test suites writing fixture scores into the real audit log, and it was fixed in
+# tests/fixture_env.py -- but verify.sh runs the same hooks on the same kind of
+# invented payload and was never part of that fix. The cost is not theoretical:
+# `./report.sh --turns` showed 9 records reading
+#
+#     request: Fix the failing test in src/utils.
+#     verdict: blocked
+#
+# which is verify.sh's own fixture, not anything that happened. Those numbers are
+# the input to the JEV_FINISH_ENFORCE=1 decision, so polluting them argues for
+# enforcing a threshold using evidence the tool manufactured itself.
+#
+# Unset rather than redirected, because jev_client falls back to JEV_GATE_LOG and
+# leaving that set would send the probes straight back into the real log.
+PROBE_LOG="$(mktemp -t jevprobe).jsonl"
+probe_env() { env -u JEV_GATE_LOG JEV_LOG="$PROBE_LOG" TYPESAFE_API_KEY="$KEY" "$@"; }
+trap 'rm -f "$PROBE_LOG"' EXIT
+
 # 4. Live round trip through the real hook, with a payload that must be denied.
 if [[ -n "$KEY" ]]; then
   OUT="$(echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":"'"$HOME"'","tool_input":{"command":"rm -rf / --no-preserve-root","description":"cleanup"}}' \
-    | TYPESAFE_API_KEY="$KEY" python3 "$GATE" 2>&1)"
+    | probe_env python3 "$GATE" 2>&1)"
   DECISION="$(echo "$OUT" | python3 -c "
 import json,sys
 try: print(json.load(sys.stdin)['hookSpecificOutput']['permissionDecision'])
@@ -113,7 +136,7 @@ except Exception: print('none')
   # 4b. Live round trip through the PostToolUse hook. The output below exits 0
   # while reporting two failures, which is precisely the case an agent skims.
   NOUT="$(echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test 2>&1 | tail -3"},"tool_response":{"stdout":"Time:        4.12 s\nRan all test suites.\nTests: 2 failed, 18 passed, 20 total","stderr":"","exit_code":0}}' \
-    | TYPESAFE_API_KEY="$KEY" python3 "$NOTICE" 2>&1)"
+    | probe_env python3 "$NOTICE" 2>&1)"
   if echo "$NOUT" | python3 -c "
 import json,sys
 try: sys.exit(0 if 'failure' in json.load(sys.stdin)['hookSpecificOutput']['additionalContext'] else 1)
@@ -147,7 +170,7 @@ PY
   # Run it with enforcement forced on, purely to prove the API round trip works
   # and the judgment is correct. The installed default is log-only.
   SOUT="$(echo '{"hook_event_name":"Stop","transcript_path":"'"$TMP"'","cwd":"'"$HOME"'","stop_hook_active":false}' \
-    | TYPESAFE_API_KEY="$KEY" JEV_FINISH_ENFORCE=1 python3 "$FINISH" 2>&1)"
+    | probe_env JEV_FINISH_ENFORCE=1 python3 "$FINISH" 2>&1)"
   rm -f "$TMP"
   if echo "$SOUT" | python3 -c "
 import json,sys

@@ -455,6 +455,50 @@ def case_legacy_env_fallback():
     return results
 
 
+def case_verify_probes_do_not_touch_the_real_log():
+    """verify.sh's live probes must log somewhere disposable.
+
+    Issue #1 was "tests write to the same log as real work, making report.sh
+    precision numbers meaningless." It was fixed in tests/fixture_env.py -- and
+    verify.sh, which runs the same hooks on the same kind of invented payload,
+    was not part of that fix. So the bug stayed open in a second place for as
+    long as the first one had been closed.
+
+    It surfaced from `./report.sh --turns`, which listed nine turns as
+
+        request: Fix the failing test in src/utils.
+        verdict: blocked
+
+    That is verify.sh's own synthetic transcript, not work anyone did. Those
+    counts are the input to the JEV_FINISH_ENFORCE=1 decision, so the tool was
+    manufacturing the evidence for its own promotion.
+
+    Two assertions, because either alone passes while the bug is live:
+      - every live probe goes through probe_env
+      - probe_env unsets JEV_GATE_LOG, since env_var() falls back to it and a
+        redirect that only sets JEV_LOG would land right back in the real log
+    """
+    verify_src = (REPO / "verify.sh").read_text()
+    # A probe is any line piping a payload into one of the hook scripts.
+    probes = [
+        line.strip()
+        for line in verify_src.splitlines()
+        if "python3 \"$" in line and line.strip().startswith("| ")
+    ]
+    unredirected = [p for p in probes if "probe_env" not in p]
+    return [
+        (bool(probes), f"found the live probes to check ({len(probes)})"),
+        (
+            not unredirected,
+            f"every live probe redirects its log ({unredirected or 'all redirected'})",
+        ),
+        (
+            "env -u JEV_GATE_LOG" in verify_src,
+            "probe_env unsets the legacy name too, or the redirect leaks through the fallback",
+        ),
+    ]
+
+
 def case_env_example_uses_current_names():
     """.env.example must not ship a name that is only kept for back-compat.
 
@@ -692,6 +736,7 @@ CASES = [
     ("uninstall clears both spellings", case_uninstall_removes_both_spellings),
     ("renamed vars still work under their old names", case_legacy_env_fallback),
     (".env.example ships current names, not aliases", case_env_example_uses_current_names),
+    ("verify.sh probes stay out of the real log", case_verify_probes_do_not_touch_the_real_log),
     ("disable fallback is mirrored in jev_pyversion", case_disable_fallback_covers_pyversion),
     ("version-guard brand has not drifted", case_brand_not_drifted),
     ("scope hook gets its own PreToolUse entry", case_scope_hook_wired_separately),

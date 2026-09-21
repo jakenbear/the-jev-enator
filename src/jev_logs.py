@@ -324,6 +324,76 @@ def gate_outcome(scores: dict) -> str:
     return worst
 
 
+# Request text that only ever comes from this repo's own synthetic payloads. A
+# record carrying one of these describes work nobody did.
+#
+# WHY THIS IS NEEDED AT ALL. Issue #1 ("tests write to the same log as real work,
+# making report.sh precision numbers meaningless") was fixed in fixture_env.py,
+# and verify.sh -- which runs the same hooks on the same invented payloads -- was
+# not covered. verify.sh is now fixed too, but 91 records were already written,
+# and the skew was not cosmetic:
+#
+#     as logged:  100 of 248 turns flagged = 40.3%
+#     real only:   24 of 157 turns flagged = 15.3%
+#
+# Every synthetic record is engineered to be a clear block, so the pollution is
+# pure bias in one direction. Anyone reading 40% would conclude the completion
+# check is far too chatty to ever enforce, and would be reading its own test data.
+#
+# Filtered at read time rather than deleted from the log: a log is append-only
+# evidence, and rewriting history to make a number look better is the opposite of
+# what an audit trail is for.
+# MATCHED ON CWD, NOT ON PROSE. The first version of this filter listed request
+# text, and that was wrong in a way worth recording: the fixtures include
+# "Deploy to staging." and "What does the usage module do?", which are also things
+# a person says. A filter that hides real data to make a number look better is a
+# worse bug than the pollution it was written to fix.
+#
+# WHAT THIS DOES NOT CATCH, stated because the gap changes how the numbers should
+# be read. Fixture runs from before JEV_TEST_CWD was pinned used whatever
+# directory the author happened to be in, so they carry a real project path and
+# are indistinguishable from real turns by any signal in the record. They are all
+# UNTIMESTAMPED -- timestamping arrived with the same round of fixes -- so the
+# trustworthy subset is the timestamped one:
+#
+#     all records, cwd-filtered:    16 of 108 turns flagged = 14.8%
+#     timestamped only:              0 of  42 turns flagged =  0.0%
+#
+# Those are not filtered out here. A log is append-only evidence and untimestamped
+# records are history, not garbage; deciding they are worthless is the reader's
+# call, and `--since` already exists for it.
+#
+# So the test's own pinned working directory is the signal. fixture_env.test_cwd()
+# returns ~/some-project, a path that exists on no real machine, and
+# record_cassette.py pins /home/runner/some-project. Nothing real runs there.
+SYNTHETIC_CWDS = ("/some-project",)
+
+# verify.sh's probes are the other source, and they run with cwd=$HOME, which IS
+# real. They are identified by payloads verify.sh alone constructs -- kept narrow
+# and exact for that reason, and checked against $HOME-level records only.
+VERIFY_PROBE_REQUESTS = ("Fix the failing test in src/utils.",)
+
+
+def is_synthetic(row: dict) -> bool:
+    """True if this record came from a fixture run or a verify.sh probe.
+
+    Two different tells, because the two sources differ: fixtures run in a pinned
+    fake directory, while verify.sh probes run in the real $HOME and have to be
+    recognised by their payload.
+    """
+    cwd = str(row.get("cwd") or "")
+    if any(marker in cwd for marker in SYNTHETIC_CWDS):
+        return True
+    head = str(row.get("request_head") or "")
+    return any(probe == head.strip() for probe in VERIFY_PROBE_REQUESTS)
+
+
+def drop_synthetic(rows: list[dict]) -> tuple[list[dict], int]:
+    """Real records, and how many synthetic ones were removed."""
+    kept = [r for r in rows if not is_synthetic(r)]
+    return kept, len(rows) - len(kept)
+
+
 def split(rows: list[dict]) -> dict:
     """Group records by hook. Handles pre-refactor rows with no 'hook' key."""
     return {
