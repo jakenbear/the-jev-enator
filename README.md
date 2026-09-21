@@ -26,6 +26,10 @@
 calibrated judgement calls **inside the agent loop** — where a full LLM call would
 be too slow and too expensive to sit in the hot path.
 
+> 👉 **New here?** [**WHY.md**](WHY.md) is the two-minute version: what breaks
+> without this, what Jev is doing that's interesting, and what a year of it cost
+> (\$0.14).
+
 ### 🎯 Four hooks so far
 
 | | Hook | Event | What it does | Default |
