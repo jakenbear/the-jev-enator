@@ -584,8 +584,57 @@ def case_brand_not_drifted():
     ]
 
 
+def case_verify_uses_the_shared_legacy_helper():
+    """verify.sh must call legacy_env_in_use(), not re-derive it inline.
+
+    It had its own copy of the loop over LEGACY_ENV, which worked and was still
+    the issue #2 shape: one rule, two copies, no test tying them together. There
+    the drifted copy was install.sh's tool matcher and the cost was MultiEdit
+    going ungated for weeks.
+
+    The helper was also, until this test, called by nothing at all -- its
+    docstring claimed "verify.sh reports these" while verify.sh did its own thing.
+    A documented-but-uncalled function is worse than no function: it reads as
+    covered.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    from jev_client import legacy_env_in_use
+
+    verify_src = (REPO / "verify.sh").read_text()
+    saved = {k: os.environ.get(k) for k in ("JEV_GATE_LOG", "JEV_LOG")}
+    try:
+        os.environ["JEV_GATE_LOG"] = "/tmp/old-name.jsonl"
+        os.environ.pop("JEV_LOG", None)
+        flagged = legacy_env_in_use()
+        os.environ["JEV_LOG"] = "/tmp/new-name.jsonl"
+        superseded = legacy_env_in_use()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    return [
+        (
+            "legacy_env_in_use()" in verify_src,
+            "verify.sh calls the shared helper",
+        ),
+        (
+            "for new, old in jev_client.LEGACY_ENV" not in verify_src,
+            "verify.sh no longer keeps its own copy of the loop",
+        ),
+        (flagged == ["JEV_GATE_LOG"], f"an old name alone is reported ({flagged})"),
+        (
+            superseded == [],
+            "an old name is silent once its replacement is set -- the new one wins",
+        ),
+    ]
+
+
 CASES = [
-    ("fresh install wires all three hooks", case_fresh_install),
+    ("fresh install wires all four hooks", case_fresh_install),
+    ("verify.sh uses the shared legacy-env helper", case_verify_uses_the_shared_legacy_helper),
     ("installing twice changes nothing", case_idempotent),
     ("install preserves foreign hooks and settings", case_preserves_foreign_hooks),
     ("uninstall removes only our hooks", case_uninstall_leaves_foreign_hooks),

@@ -121,8 +121,13 @@ def env_var(name: str) -> str | None:
 def legacy_env_in_use() -> list[str]:
     """Old variable names that are set while their replacement is not.
 
-    verify.sh reports these. A fallback that works but is never mentioned is how
-    a deprecated name outlives the thing it was renamed from.
+    verify.sh check 5b reports these. A fallback that works but is never
+    mentioned is how a deprecated name outlives the thing it was renamed from.
+
+    verify.sh had its own inline copy of this loop for a while, which is the same
+    two-copies-of-one-rule shape as issue #2 -- there the hardcoded tool matcher
+    drifted from the real one and MultiEdit stopped being gated. Adding a name to
+    LEGACY_ENV should not require remembering a shell script also knows the rule.
     """
     return sorted(
         old

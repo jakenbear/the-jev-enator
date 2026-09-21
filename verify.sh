@@ -197,11 +197,11 @@ try:
     env = json.loads(pathlib.Path('$SETTINGS').read_text()).get('env', {})
 except Exception:
     env = {}
-combined = {**env, **os.environ}
-print(' '.join(sorted(
-    old for new, old in jev_client.LEGACY_ENV.items()
-    if combined.get(old) and not combined.get(new)
-)))
+# settings.json under the live environment, because a hook reads both and the
+# shell wins. Overlaid into os.environ rather than compared separately so the
+# shared helper sees exactly what a hook would.
+os.environ.update({k: v for k, v in env.items() if k not in os.environ})
+print(' '.join(jev_client.legacy_env_in_use()))
 " 2>/dev/null)"
 if [[ -n "$LEGACY" ]]; then
   note "using pre-rename names: $LEGACY (still honoured; rename when convenient)"

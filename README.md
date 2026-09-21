@@ -870,13 +870,14 @@ tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stop
 tests/test_jev_scope.py  13 pending writes, 8 in scope and 5 out of it (reads the log)
 tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
+tests/spike_grep_rank.py    the spike for #10: ranking grep hits. Measured, not built
 install.sh               wire into / out of settings.json
 CONTRIBUTING.md          setup, how to report a bad call, threshold rules
 assets/logo.svg          icon, dark background (logo-light.svg for light)
-verify.sh                prove all three hooks are on and working
+verify.sh                prove all four hooks are on and working
 report.sh                read the audit log: what fired, and would it have been right
 redact.sh                strip a log so it can be shared (--audit says what goes)
-src/jev_logs.py          load, merge, filter and redact logs; shared by both
+src/jev_logs.py          load, merge, filter and redact logs; shared by report/redact
 tests/test_jev_logs.py   the merge and redaction rules, fixtures only
 tests/fixture_env.py     keeps fixture scores out of your real audit log
 tests/record_cassette.py record live responses so the suites run offline
