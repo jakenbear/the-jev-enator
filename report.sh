@@ -105,8 +105,13 @@ mode = os.environ["MODE"]
 limit = int(os.environ["LIMIT"])
 since = os.environ.get("SINCE", "")
 as_json = os.environ.get("JSON") == "1"
-by_source = os.environ.get("BY_SOURCE") == "1"
 paths = sys.argv[1:]
+# Naming several logs IS the request to compare them. --json already worked this
+# way; the text report did not, so `./report.sh a.jsonl b.jsonl` printed one
+# merged average and silently dropped the side-by-side -- hiding the exact thing
+# pooling exists to surface, which is a threshold that is fine on four machines
+# and wrong on the fifth. An average is how that stays invisible.
+by_source = os.environ.get("BY_SOURCE") == "1" or len(paths) > 1
 
 rows = jev_logs.load_many(paths)
 total_before = len(rows)
@@ -123,7 +128,7 @@ if as_json:
         "excluded_by_since": total_before - len(rows),
         "summary": jev_logs.summarize(rows),
     }
-    if by_source or len(paths) > 1:
+    if by_source:
         out["by_source"] = jev_logs.by_source(rows)
     print(json.dumps(out, indent=2))
     raise SystemExit(0)

@@ -13,7 +13,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 12 OKs
+./verify.sh                   # should print 15 OKs
 ```
 
 Python 3.10+, standard library only. No build step, no dependencies, no

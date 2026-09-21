@@ -455,6 +455,50 @@ def case_legacy_env_fallback():
     return results
 
 
+def case_env_example_uses_current_names():
+    """.env.example must not ship a name that is only kept for back-compat.
+
+    This was a live bug, and a nasty one because every symptom pointed somewhere
+    else. .env.example said JEV_GATE_LOG, so a coworker following the README was
+    handed a pre-rename name on a clean install. The old name works -- that is the
+    whole point of LEGACY_ENV -- so nothing failed. What happened instead:
+
+      1. install.sh saw JEV_GATE_LOG already set and skipped writing JEV_LOG,
+         deliberately, to avoid two names for one setting (case_legacy_env_not_duplicated).
+      2. verify.sh then reported "using pre-rename names" at them, on a fresh
+         clone, about a choice they never made.
+
+    A back-compat alias is for people who installed before the rename. Shipping
+    one in the template makes every NEW install look like an old one, and the
+    fallback then has no way to ever age out.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    from jev_client import LEGACY_ENV, LOG_NAME
+
+    example = (REPO / ".env.example").read_text()
+    # Settings only, not prose. The file explains WHY the old name is a trap, and
+    # that explanation necessarily contains the old name -- a whole-file substring
+    # match would forbid documenting the bug it exists to prevent.
+    settings = "\n".join(
+        line for line in example.splitlines() if line.strip().startswith("export ")
+    )
+    results = [
+        (
+            old not in settings,
+            f".env.example does not hand new users the deprecated {old}",
+        )
+        for old in sorted(LEGACY_ENV.values())
+    ]
+    results.append(("JEV_LOG" in example, ".env.example sets the current JEV_LOG"))
+    results.append(
+        (
+            LOG_NAME in example,
+            f".env.example points at the current log filename ({LOG_NAME})",
+        )
+    )
+    return results
+
+
 def case_disable_fallback_covers_pyversion():
     """jev_pyversion duplicates the disable fallback; assert it has not drifted.
 
@@ -647,6 +691,7 @@ CASES = [
     ("a pre-rename env var is not duplicated", case_legacy_env_not_duplicated),
     ("uninstall clears both spellings", case_uninstall_removes_both_spellings),
     ("renamed vars still work under their old names", case_legacy_env_fallback),
+    (".env.example ships current names, not aliases", case_env_example_uses_current_names),
     ("disable fallback is mirrored in jev_pyversion", case_disable_fallback_covers_pyversion),
     ("version-guard brand has not drifted", case_brand_not_drifted),
     ("scope hook gets its own PreToolUse entry", case_scope_hook_wired_separately),

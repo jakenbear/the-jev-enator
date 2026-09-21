@@ -120,7 +120,7 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 12 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 15 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
@@ -144,7 +144,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 12 OKs
+./verify.sh                   # should print 15 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
