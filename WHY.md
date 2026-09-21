@@ -229,6 +229,23 @@ Each is one `false` criteria example away from fixed, which is the point of
 criteria-over-prompts — but it is unfixed today, and a new user will hit the
 `source .env` one within a week.
 
+**The completion check flagged 5.7% of real turns** — 3 of 53, once you exclude
+records from before test isolation landed (`--since` does this). All three were
+conversational turns rather than work: a greeting, an instruction that was then
+carried out, a context-compaction header.
+
+I tried to reproduce all three as fixtures and **could not**. Rebuilt at fixture
+size they score 0.04–0.12, which is correct. So whatever drove the real 0.9x
+lives in the part of the turn the audit log doesn't keep — it stores a 220-char
+request excerpt, not the full state that was scored.
+
+> [!CAUTION]
+> Which means those three are **unadjudicated, not false positives.** Judging
+> them from the excerpt alone would be the same mistake as trusting a summary
+> instead of reading the records — the mistake this whole page is a correction
+> for. The log needs to keep enough to re-judge a flag later; it currently
+> doesn't, and that's the real finding.
+
 > [!TIP]
 > **Don't take this page's word for any of it.** Run it for a week, then
 > `./report.sh --turns` and judge the flags yourself. That command exists
