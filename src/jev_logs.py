@@ -75,7 +75,16 @@ SAFE_FIELDS = frozenset(
 # `path` is here and not in SAFE_FIELDS on purpose. It is only a filename, but it
 # is an absolute one -- it carries the home directory, so the username, and the
 # project name along with it. Somebody's repo layout is not mine to publish.
-SENSITIVE_FIELDS = frozenset({"cwd", "command", "state_head", "request_head", "path"})
+#
+# `state_tail` is the most sensitive field in the project and is named here rather
+# than left to the default drop. jev_finish writes it on a flagged turn so the flag
+# can be adjudicated later -- it is the prompt, the closing message, and the last
+# tool calls with their output. The allowlist would drop it anyway; naming it means
+# audit() reports it and nobody later mistakes the silence for an oversight. It is
+# dropped even under --keep-commands, because it contains request text.
+SENSITIVE_FIELDS = frozenset(
+    {"cwd", "command", "state_head", "state_tail", "request_head", "path"}
+)
 
 # 'error' is its own case. The text is ours, but an exception message can quote a
 # URL or a path, so it is truncated rather than trusted or dropped -- an error
@@ -416,6 +425,40 @@ VERIFY_PROBE_COMMANDS = (
 )
 
 
+# Request text that appears ONLY in this repo's finish fixtures, matched only on
+# records that have no timestamp. Both halves are load-bearing.
+#
+# The gap these close is documented above: fixture runs from before JEV_TEST_CWD
+# was pinned used whatever directory the author was in, so they carry a real
+# project path and the cwd tell walks straight past them. On a real log that was
+# 13 of 27 flagged turns -- and since every fixture is engineered to be a clear
+# block, the bias is entirely one-way in the number that decides enforcement.
+#
+# WHY PROSE MATCHING IS SAFE HERE AND WAS NOT BEFORE. #22 warned against matching
+# fixture prose, and that warning was right: "Fix the failing date formatter test
+# in src/utils." is a thing a person says, and a filter that hides real turns to
+# improve a number is worse than the pollution it fixes. What makes it safe is the
+# timestamp guard. Timestamping landed in the same round of fixes that pinned the
+# fixture cwd, so fixture prose AND no `ts` can only mean a run from before both.
+# Type the same sentence today and the record carries a `ts` and survives.
+#
+# These must stay character-identical to the CASES in tests/test_jev_finish.py.
+FIXTURE_REQUESTS = (
+    "Fix the failing date formatter test in src/utils.",
+    "Update all three chart components in src/components/Statistics to the new palette: Bar, Line, and Pie.",
+    "Implement the clip export endpoint.",
+    "Add a usage report script and run it for last month.",
+    "Update the three chart components to the new palette.",
+)
+
+
+def _untimestamped_fixture(row: dict) -> bool:
+    """True for pre-timestamping fixture prose, which no other tell can catch."""
+    if row.get("ts"):
+        return False
+    return str(row.get("request_head") or "").strip() in FIXTURE_REQUESTS
+
+
 def _probe_command(row: dict) -> bool:
     """True if this row's command is exactly one verify.sh sends.
 
@@ -445,6 +488,8 @@ def is_synthetic(row: dict) -> bool:
         return True
     head = str(row.get("request_head") or "")
     if any(probe == head.strip() for probe in VERIFY_PROBE_REQUESTS):
+        return True
+    if _untimestamped_fixture(row):
         return True
     return _probe_command(row)
 

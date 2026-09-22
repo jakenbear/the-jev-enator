@@ -548,6 +548,95 @@ def case_synthetic_records_are_excluded():
     ]
 
 
+def case_state_tail_is_redacted():
+    """The new evidence field is the most sensitive thing in the log.
+
+    jev_finish now keeps the tail of the scored state on a flagged turn, so a flag
+    can actually be adjudicated later (#25 found that it could not). That tail is
+    the user's prompt, the assistant's closing message, and the last tool calls
+    with their output -- strictly more sensitive than `state_head`, which is
+    already dropped. If this field ever reached a shared log it would be the
+    worst leak in the project.
+    """
+    row = {
+        "hook": "finish",
+        "verdict": "would_block",
+        "flagged": ["claimed_without_verifying"],
+        "scores": {"claimed_without_verifying": 0.91},
+        "state_tail": (
+            "## What the user asked for\ndeploy pricing for Acme Corp\n\n"
+            "## Tool calls\n- Bash {\"command\": \"curl -H 'Authorization: Bearer "
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.dBjftJeZ4CVPmB92K27uhbUJU1p1r'\"}\n"
+            "  -> [ok] done in /Users/jane.doe@corp.example.com/billing\n"
+        ),
+        "ts": "2026-09-22T12:00:00",
+    }
+    out = jev_logs.redact(row)
+    kept = jev_logs.redact(row, keep_commands=True)
+    return [
+        ("state_tail" not in out, "state_tail dropped by default"),
+        (
+            "state_tail" not in kept,
+            "state_tail dropped even with --keep-commands (it contains the prompt)",
+        ),
+        ("Acme Corp" not in json.dumps(out), "a customer name in the tail does not survive"),
+        ("eyJhbGciOi" not in json.dumps(out), "a bearer token in the tail does not survive"),
+        ("jane.doe" not in json.dumps(out), "the username in the tail does not survive"),
+        (out["scores"] == row["scores"], "the probabilities still survive"),
+        (out["flagged"] == ["claimed_without_verifying"], "which question fired survives"),
+        (
+            jev_logs.audit([row]).get("state_tail") == 1,
+            "audit counts state_tail as something stripped",
+        ),
+    ]
+
+
+def case_untimestamped_fixture_prose_is_synthetic():
+    """Fixture requests from before JEV_TEST_CWD was pinned are still synthetic.
+
+    Those runs used whatever directory the author was in, so they carry a real
+    project path and the cwd tell cannot see them. On a real log they are 13 of 27
+    flagged turns -- every one of them engineered to be a clear block, so they are
+    pure one-way bias in the number that decides whether to enforce.
+
+    THE PROSE MATCH IS SCOPED TO UNTIMESTAMPED RECORDS, and that guard is the
+    whole reason this is safe to add at all. jev_logs has warned since #22 that
+    matching fixture prose deletes real evidence, because fixtures say things
+    people genuinely say -- "Fix the failing date formatter test in src/utils." is
+    an ordinary request. But timestamping arrived in the same round of fixes that
+    pinned the fixture cwd, so a record with fixture prose AND no timestamp can
+    only be from before both. A real turn from today carries a `ts` and survives.
+    """
+    fixture_prose = "Fix the failing date formatter test in src/utils."
+    old_fixture = {
+        "hook": "finish", "verdict": "blocked", "flagged": ["ignored_failure"],
+        "cwd": "/Users/jane.doe@corp.example.com/media-clips-web",
+        "request_head": fixture_prose,
+    }
+    # The same words, typed by a person, after timestamping existed.
+    real_today = {**old_fixture, "ts": "2026-09-22T11:00:00"}
+    # Untimestamped but NOT fixture prose: ordinary history, must survive.
+    old_real = {
+        "hook": "finish", "verdict": "complete",
+        "cwd": "/Users/jane.doe@corp.example.com/media-clips-web",
+        "request_head": "add a tooltip to the bar chart",
+    }
+    kept, dropped = jev_logs.drop_synthetic([old_fixture, real_today, old_real])
+    return [
+        (jev_logs.is_synthetic(old_fixture), "untimestamped fixture prose is synthetic"),
+        (
+            not jev_logs.is_synthetic(real_today),
+            "the SAME words with a timestamp are real and KEPT",
+        ),
+        (
+            not jev_logs.is_synthetic(old_real),
+            "an untimestamped record that is not fixture prose is KEPT",
+        ),
+        (dropped == 1, f"exactly one dropped (got {dropped})"),
+        (len(kept) == 2, "both real records survive"),
+    ]
+
+
 def case_legacy_kind_labels_are_merged():
     """Pre-#14 kind names must count as the same kind as their new names.
 
@@ -643,6 +732,8 @@ def case_gate_reasons_are_not_silently_truncated():
 
 CASES = [
     ("load skips unparseable lines", case_load_skips_garbage),
+    ("untimestamped fixture prose is synthetic", case_untimestamped_fixture_prose_is_synthetic),
+    ("the state_tail evidence field is redacted", case_state_tail_is_redacted),
     ("legacy kind labels merge with their new names", case_legacy_kind_labels_are_merged),
     ("every noticed record is accounted for", case_noticed_records_are_fully_accounted),
     ("gate reasons are all retained", case_gate_reasons_are_not_silently_truncated),

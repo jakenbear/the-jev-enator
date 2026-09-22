@@ -186,10 +186,27 @@ if mode == "turns":
             "ignored_failure": "ignored-fail",
         }
         print("    scores:  " + "  ".join(f"{SHORT.get(k, k)}={v:.2f}" for k, v in s.items()))
+        # The evidence, when the record has it. Without this the question below is
+        # unanswerable: #25 tried to adjudicate three flags from request_head
+        # alone, could not reproduce them as fixtures, and had to retract calling
+        # them false positives. Records written before jev_finish started keeping
+        # a tail say so, rather than looking like turns with nothing to show.
+        tail = r.get("state_tail")
+        if tail:
+            closing = "## The assistant's final message, as it is about to end its turn\n"
+            if closing in tail:
+                said = " ".join(tail.split(closing, 1)[1].split())
+                print(f"    said:    {said[:300]}")
+            else:
+                print(f"    state:   ...{' '.join(tail.split())[-300:]}")
+        else:
+            print("    said:    (not recorded -- predates state_tail; cannot adjudicate)")
         print()
     print("  For each: was the flag right? If most are wrong, raise the thresholds")
     print("  in BLOCK_AT or add a criteria example. If most are right, consider")
-    print("  JEV_FINISH_ENFORCE=1.\n")
+    print("  JEV_FINISH_ENFORCE=1.")
+    print("  Judge from `said`, not from `request`: a 220-char request head is not")
+    print("  enough to call a flag wrong -- see PR #25, which got that wrong.\n")
     raise SystemExit(0)
 
 

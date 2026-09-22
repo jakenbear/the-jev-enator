@@ -166,6 +166,27 @@ MAX_STATE_CHARS = 14000
 MAX_TOOL_RESULT_CHARS = 600
 MAX_TOOL_INPUT_CHARS = 400
 
+# How much of the scored state to keep on a FLAGGED record, so the flag can be
+# re-judged later.
+#
+# This closes the gap #25 found the hard way. That PR set out to fix three flags
+# as false positives, wrote the reproducing fixtures first, and found they scored
+# 0.04-0.12 -- correctly. The fixtures could not reproduce the real 0.89-0.92
+# because the log kept only a 220-char request_head, not the state that was
+# actually scored, so the real flags could not be adjudicated at all. Judging them
+# from the head alone was the error this repo exists to catch.
+#
+# ./report.sh --turns asks the reader "was this flag right?" and then withholds
+# what they would need to answer. So: on a flag, keep the tail of the state.
+# The tail, not the head, because the closing message and the last few tool calls
+# are what claimed_without_verifying and ignored_failure are actually about.
+#
+# Only on flagged turns. A complete turn needs no evidence, and this is the
+# largest string in any record -- the log grows fast enough without storing the
+# state of every turn that passed. `state_tail` is NOT in jev_logs.SAFE_FIELDS, so
+# redact.sh drops it before a log is ever shared.
+MAX_STATE_TAIL_CHARS = 2000
+
 
 def emit_allow() -> None:
     """Let the turn end."""
@@ -390,19 +411,23 @@ def main() -> None:
 
     # One record per turn, carrying enough to judge the call later: the verdict,
     # every probability, and the request itself. report.sh reads this.
-    log(
-        {
-            "hook": "finish",
-            "verdict": verdict,
-            "enforcing": enforcing,
-            "flagged": [name for _, name in hits],
-            "cwd": payload.get("cwd"),
-            "scores": scores,
-            "latency_ms": elapsed_ms,
-            "usage": usage,
-            "request_head": request_head(state),
-        }
-    )
+    record = {
+        "hook": "finish",
+        "verdict": verdict,
+        "enforcing": enforcing,
+        "flagged": [name for _, name in hits],
+        "cwd": payload.get("cwd"),
+        "scores": scores,
+        "latency_ms": elapsed_ms,
+        "usage": usage,
+        "request_head": request_head(state),
+    }
+    # Evidence, only when there is something to adjudicate. See
+    # MAX_STATE_TAIL_CHARS: without this a flag cannot be re-judged after the
+    # fact, which is what ./report.sh --turns asks the reader to do.
+    if hits:
+        record["state_tail"] = state[-MAX_STATE_TAIL_CHARS:]
+    log(record)
 
     if vetoed or not hits or not enforcing:
         emit_allow()
