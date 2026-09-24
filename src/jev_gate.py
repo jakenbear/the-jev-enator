@@ -11,6 +11,7 @@ Env:
   TYPESAFE_API_KEY       required, else the hook no-ops
   JEV_LOG                optional path for a JSONL audit log
   JEV_DISABLE            set to 1 to bypass every hook in this repo
+  JEV_GATE_OFF           set to 1 to bypass only this hook
   JEV_GATE_EXTRA_TOOLS   comma-separated extra tool names to gate, e.g. MCP tools
                          (keeps GATE in its name: this one really is gate-only)
 
@@ -283,7 +284,7 @@ def main() -> None:
         print("|".join(sorted(gated_tools())))
         sys.exit(0)
 
-    if disabled():
+    if disabled() or os.environ.get("JEV_GATE_OFF") == "1":
         emit(None)
 
     key = api_key()

@@ -30,6 +30,8 @@ GATE = str(REPO / "src" / "jev_gate.py")
 NOTICE = str(REPO / "src" / "jev_notice.py")
 FINISH = str(REPO / "src" / "jev_finish.py")
 SCOPE = str(REPO / "src" / "jev_scope.py")
+READS = str(REPO / "src" / "jev_reads.py")
+CLEAR = str(REPO / "src" / "jev_clear.py")
 
 # A hook belonging to someone else, in the same events this repo installs into.
 # Nothing may ever remove or reorder these.
@@ -85,7 +87,7 @@ def make_home(initial: dict) -> Path:
 
 
 def case_fresh_install():
-    """An empty settings.json: all three hooks land, with the derived matcher."""
+    """An empty settings.json: every hook lands, with the derived matcher."""
     home = make_home({})
     try:
         proc = run(home)
@@ -101,6 +103,8 @@ def case_fresh_install():
             (NOTICE in commands(data, "PostToolUse"), "notice wired to PostToolUse"),
             (NOTICE in commands(data, "PostToolUseFailure"), "notice wired to PostToolUseFailure"),
             (FINISH in commands(data, "Stop"), "finish wired to Stop"),
+            (READS in commands(data, "PreToolUse"), "reads ranker wired to PreToolUse"),
+            (CLEAR in commands(data, "UserPromptSubmit"), "clear advisor wired to UserPromptSubmit"),
             (
                 any(e.get("matcher") == matcher for e in pre),
                 "PreToolUse matcher matches --matcher output",
@@ -657,6 +661,33 @@ def case_scope_uninstall_removes_only_itself():
         shutil.rmtree(home, ignore_errors=True)
 
 
+def case_reads_hook_wired_on_read_only():
+    """The reads ranker gets its own PreToolUse entry, matching Read and nothing else.
+
+    Sharing the gate's entry would run a file-excerpt call on every Bash command;
+    widening its matcher would send file content for tools it has no state for.
+    Uninstall must take it without touching anything else in PreToolUse.
+    """
+    home = make_home({"hooks": {"PreToolUse": [FOREIGN_PRE]}})
+    try:
+        run(home)
+        data = settings_of(home)
+        entry_of = {
+            h.get("command"): e.get("matcher")
+            for e in data["hooks"]["PreToolUse"]
+            for h in e.get("hooks", [])
+        }
+        run(home, "--uninstall")
+        after = commands(settings_of(home), "PreToolUse")
+        return [
+            (entry_of.get(READS) == "Read", f"reads entry matches Read only (got {entry_of.get(READS)!r})"),
+            (READS not in after, "uninstall removes the reads hook"),
+            ("/opt/corp/audit-hook.sh" in after, "foreign PreToolUse hook survived"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 def case_brand_not_drifted():
     """jev_pyversion hardcodes the brand; assert it still matches the real one.
 
@@ -723,7 +754,7 @@ def case_verify_uses_the_shared_legacy_helper():
 
 
 CASES = [
-    ("fresh install wires all four hooks", case_fresh_install),
+    ("fresh install wires every hook", case_fresh_install),
     ("verify.sh uses the shared legacy-env helper", case_verify_uses_the_shared_legacy_helper),
     ("installing twice changes nothing", case_idempotent),
     ("install preserves foreign hooks and settings", case_preserves_foreign_hooks),
@@ -744,6 +775,7 @@ CASES = [
     ("scope hook gets its own PreToolUse entry", case_scope_hook_wired_separately),
     ("scope matcher is derived, not hardcoded", case_scope_matcher_matches_watched_tools),
     ("uninstall removes the scope hook and not the gate", case_scope_uninstall_removes_only_itself),
+    ("reads hook gets its own Read-only entry", case_reads_hook_wired_on_read_only),
 ]
 
 

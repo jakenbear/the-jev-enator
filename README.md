@@ -17,7 +17,7 @@
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-2ea44f">
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
-  <img alt="tests 71/71" src="https://img.shields.io/badge/fixtures-71%2F71-2ea44f">
+  <img alt="tests 86/86" src="https://img.shields.io/badge/fixtures-86%2F86-2ea44f">
   <img alt="CI" src="https://github.com/jakenbear/the-jev-enator/actions/workflows/test.yml/badge.svg">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
@@ -30,7 +30,7 @@ be too slow and too expensive to sit in the hot path.
 > without this, what Jev is doing that's interesting, and what a year of it cost
 > (\$0.14).
 
-### 🎯 Four hooks so far
+### 🎯 Six hooks so far
 
 | | Hook | Event | What it does | Default |
 | :-: | --- | --- | --- | --- |
@@ -38,9 +38,11 @@ be too slow and too expensive to sit in the hot path.
 | 🔔 | **failure notice** | `PostToolUse` | Tells the agent when command output contains a failure | 🔴 **enforcing** |
 | ✅ | **completion check** | `Stop` | Judges whether Claude actually finished its turn | 🟡 **log-only** |
 | 🔍 | **scope check** | `PreToolUse` | Notes when a write isn't part of what you asked for | ⚪ **log-only, always** |
+| 📖 | **reads ranker** | `PreToolUse` | Ranks which part of a big file a whole-file Read actually needed | 👻 **shadow** |
+| 🧹 | **clear advisor** | `UserPromptSubmit` | Tells *you* when a prompt starts a new task in a big context, so `/clear` pays | 💬 **note to you only** |
 
 The first two stop bad things. The failure notice is the only one that makes the
-agent *better*, and it's the most interesting of the four.
+agent *better*, and it's the most interesting of the six.
 
 ⚪ **The scope check has no enforcing mode.** Not a default awaiting a flag —
 there is no flag. It answers "did anyone ask for this," which is the scope-creep
@@ -109,6 +111,12 @@ Honest status, so you can decide whether to trust it:
   plan": the last few user messages. It cannot block, so the worst case is a log
   line you disagree with. `./report.sh` prints how often its own flags were
   already explained by an earlier turn — that number is the evaluation.
+- **Reads ranker** — shadow mode, changes nothing. 6/6 scored fixtures with wide
+  margins (right chunk at p ≥ 0.99, `whole_file` at ≥ 0.96), zero real traffic.
+  `./jev reads` is the evaluation: was each suggested region the one the work needed?
+- **Clear advisor** — 9/9 fixtures (continuations ≤ 0.22 on `new_task`, new tasks
+  ≥ 0.88). Its only output is a note to you, so a wrong call costs a glance.
+  `./jev clear` lists every suggestion against its prompt.
 
 None of them has been validated across a team yet. If you're the second person to run
 this, read [Tune it on yourself first](#-tune-it-on-yourself-first).
@@ -125,10 +133,12 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 16 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 22 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
+
+Everything else is one menu away: run `./jev`. See [The `./jev` menu](#-the-jev-menu).
 
 ---
 
@@ -149,7 +159,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 16 OKs
+./verify.sh                   # should print 22 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -157,7 +167,7 @@ Then **restart Claude Code** — `settings.json` is only read at startup.
 Get a key at [typesafe.ai](https://typesafe.ai). Pricing is $0.042 per million
 input tokens, output free.
 
-`install.sh` appends to the `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, and `Stop` arrays without touching hooks
+`install.sh` appends to the `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `UserPromptSubmit` arrays without touching hooks
 you already have, backs up `settings.json` to `settings.json.bak-jevenator`, and is
 safe to run twice. It can live anywhere — paths are resolved relative to the
 script, so `~/the-jev-enator` is a suggestion, not a requirement.
@@ -183,12 +193,84 @@ To remove it:
 ./install.sh --uninstall
 ```
 
-That unregisters all four hooks and removes the key and log path it added. Your
+That unregisters every hook and removes the key and log path it added. Your
 original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
 
-There is nothing to run. You use Claude Code exactly as before.
+There is nothing to run. You use Claude Code exactly as before. The hooks fire
+on their own; the only one that ever talks to *you* is the clear advisor:
+
+```
+[ ⊙ ─ ] new task at 140k context (p=0.96) -- /clear would save ~140k tokens per call.
+```
+
+Type `/clear` if it's right, ignore it if not. Claude doesn't see it.
+
+### 🕹️ The `./jev` menu
+
+Everything you'd run by hand, in one place. From the repo:
+
+```bash
+./jev
+```
+
+```
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ┃  [ ⊙ ─ ]  THE JEV-ENATOR                         ┃
+  ┃  calibrated checks for Claude Code               ┃
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  hooks installed · completion check log-only
+
+   1  Status                 is every hook on and working
+   2  Audit report           what the hooks decided, and would they have been right
+   3  Token report           where your Claude Code tokens actually go
+   4  Reads ranker log       what it would have narrowed, and what that saves
+   5  Clear advisor log      which prompts it called a new task, and the context
+   6  Hooks on/off           turn single hooks on or off
+   7  Run offline tests      every suite, recorded responses, no spend
+   8  Install / reinstall    wire the hooks into Claude Code
+   9  Uninstall              remove the hooks, keep the repo
+  10  Redact log             make the audit log safe to share
+   q  Quit
+```
+
+Type a number and Enter. Each item runs the same script you could run yourself,
+so the menu can't drift from the rest of this README.
+
+Skip the menu with a name; anything after it is passed through:
+
+| Command | Runs | Try |
+| --- | --- | --- |
+| `./jev status` | `verify.sh` | after install, or when something seems off |
+| `./jev report` | `report.sh` | `./jev report --turns 20` |
+| `./jev tokens` | `tokens.sh` | `./jev tokens --since 2026-09-01 --top 20` |
+| `./jev reads` | the reads ranker's log | once you've had a few big-file reads |
+| `./jev clear` | the clear advisor's log | after a few long sessions |
+| `./jev hooks` | toggles in `settings.json` `env` | then restart Claude Code |
+| `./jev test` | every offline suite | before a commit; no key, no spend |
+| `./jev install` / `uninstall` | `install.sh` | |
+| `./jev redact` | `redact.sh` | `./jev redact -o mine.jsonl` |
+
+**Hooks on/off** writes the same `JEV_*_OFF` switches listed in
+[Turning things off](#-turning-things-off) into `settings.json`, backing it up to
+`settings.json.bak-jevenator` first. The one switch that lets a hook *block* work
+(`JEV_FINISH_ENFORCE`) asks before it turns on. Restart Claude Code after any change.
+
+### 📉 The token report
+
+```bash
+./tokens.sh                      # every transcript under ~/.claude/projects
+./tokens.sh --since 2026-09-01   # from a date
+./tokens.sh --project the-jev    # one project
+./tokens.sh --top 20             # longer "biggest items" list
+```
+
+No Jev, no network: it reads your Claude Code transcripts and reports tokens per
+call, how big your context usually is, how often it compacted, and — the number
+that matters — what each tool result **carried**: its size times the number of
+later calls that re-read it. That's what found the two newest hooks' targets:
+whole-file Reads re-read 100–200 times, and new tasks started in a 100k+ context.
 
 ### 🛡️ The danger gate
 
@@ -364,8 +446,13 @@ per turn.
 export JEV_NOTICE_OFF=1       # failure notice off, others stay on
 export JEV_FINISH_OFF=1       # completion check off, others stay on
 export JEV_SCOPE_OFF=1        # scope check off, others stay on
-export JEV_DISABLE=1          # all four off for this shell
-./install.sh --uninstall      # all four off for good
+export JEV_READS_OFF=1        # reads ranker off, others stay on
+export JEV_GATE_OFF=1         # danger gate off, others stay on
+export JEV_CLEAR_OFF=1        # clear advisor off, others stay on
+export JEV_CLEAR_QUIET=1      # clear advisor logs, shows no note
+export JEV_DISABLE=1          # every hook off for this shell
+./install.sh --uninstall      # every hook off for good
+./jev hooks                   # toggle any of these in settings.json
 ```
 
 Or set any of them in the `env` block of `settings.json` to make it persistent.
@@ -377,16 +464,20 @@ when you don't want to spend the tokens.
 
 | Variable | Read by | What it does |
 | --- | --- | --- |
-| `TYPESAFE_API_KEY` | all four | Required. Without it every hook no-ops. |
-| `JEV_LOG` | all four | Path to the JSONL audit log. Set by `install.sh`. |
-| `JEV_DISABLE` | all four | `1` bypasses every hook in this repo. |
-| `JEV_REPLAY` | all four | Cassette path; runs offline against recorded answers. |
-| `JEV_RECORD` | all four | Appends live answers to a file, for re-recording a cassette. |
+| `TYPESAFE_API_KEY` | all | Required. Without it every hook no-ops. |
+| `JEV_LOG` | all | Path to the JSONL audit log. Set by `install.sh`. |
+| `JEV_DISABLE` | all | `1` bypasses every hook in this repo. |
+| `JEV_REPLAY` | all | Cassette path; runs offline against recorded answers. |
+| `JEV_RECORD` | all | Appends live answers to a file, for re-recording a cassette. |
 | `JEV_GATE_EXTRA_TOOLS` | gate | Comma-separated extra tool names to gate. Keeps `GATE`: it really is gate-only. |
 | `JEV_NOTICE_OFF` | notice | `1` disables just the failure notice. |
 | `JEV_FINISH_ENFORCE` | finish | `1` lets the completion check block. Default is log-only. |
 | `JEV_FINISH_OFF` | finish | `1` disables just the completion check. |
 | `JEV_SCOPE_OFF` | scope | `1` disables just the scope check. |
+| `JEV_READS_OFF` | reads | `1` disables just the reads ranker. |
+| `JEV_GATE_OFF` | gate | `1` disables just the danger gate. |
+| `JEV_CLEAR_OFF` | clear | `1` disables just the clear advisor. |
+| `JEV_CLEAR_QUIET` | clear | `1` keeps the clear advisor judging and logging, with no note. |
 
 The first five were `JEV_GATE_*` before, which was wrong rather than merely
 stale — `JEV_GATE_DISABLE` also silenced the notice and the completion check.
@@ -821,7 +912,55 @@ the cheap definition of "the plan" failing, not scope creep caught. If most flag
 land there, the fix is reading the plan from `ExitPlanMode` — which this hook
 can't see today — rather than moving a threshold.
 
-Turn it off on its own with `JEV_SCOPE_OFF=1`; the other three keep running.
+Turn it off on its own with `JEV_SCOPE_OFF=1`; the others keep running.
+
+### 📖 Reads ranker — `src/jev_reads.py`
+
+`./tokens.sh` found where the input tokens actually go, and it isn't log dumps.
+It's whole-file Reads: a 10k-token file read once is re-read as part of the
+context on every later call — 100–200 of them — until compaction. One read
+carried 1.4M tokens. The agent usually needed one function.
+
+Before a `Read` of a file of 300+ lines with no `offset`/`limit`, it splits the
+file at top-level definitions (headings, for markdown; fixed windows otherwise)
+and asks **one** `choice` question: given your last three messages, which chunk
+does this read need? The distribution over chunks *is* the ranking — up to 20
+chunks in one ~350ms call. `whole_file` is one of the options, so an overview, a
+review, or a change to every function has somewhere to go instead of being forced
+onto a chunk. It names a region only at p ≥ 0.40 with a 0.20 margin.
+
+**Shadow mode: it changes nothing.** It logs what it would have narrowed to and
+the tokens that saves. Narrowing fails *unsafe* — an agent doesn't know what it
+didn't see — so the log comes before any nudge. Read it with `./jev reads`: for
+each suggestion, was that region the one the work needed?
+
+**It sends file excerpts to typesafe.ai**: the first ~320 characters of each
+chunk, plus your last three messages. The other hooks send commands and output;
+this one sends source. If that's not OK for a repo, `JEV_READS_OFF=1`.
+
+### 🧹 Clear advisor — `src/jev_clear.py`
+
+Median context on the machine this was measured on: 112k tokens. 92% of calls
+over 60k, 219 auto compactions, zero manual ones. Every call re-reads the whole
+context, so a new task started at 140k pays 140k tokens a call for history it
+never uses. `/clear` fixes that for free, and nobody runs it, because nobody
+notices the moment the task changed.
+
+On each prompt sent with over 60k in context it asks two questions in one call:
+
+| Question | fires at | role |
+| --- | --- | --- |
+| `new_task` | 0.80 | is this separate work a fresh conversation could do as well? |
+| `needs_history` | vetoes above 0.30 | "now add tests", "same for X", "go with 2" — sentences that only mean something with the history |
+
+On fixtures, six continuations scored `new_task` ≤ 0.22 with `needs_history` ≥ 0.96,
+and three new tasks scored ≥ 0.88 / ≤ 0.10.
+
+A hit shows **you** a one-line note — `new task at 140k context -- /clear would save
+~140k tokens per call`. Claude never sees it: no context spent, nothing to derail.
+That's why it's on by default: a wrong note costs a glance. `./jev clear` lists
+every suggestion against its prompt so you can judge them. Under 60k, slash
+commands, and `!` commands never call Jev.
 
 ### 🎛️ Tuning
 
@@ -912,17 +1051,25 @@ src/jev_gate.py          PreToolUse  — danger gate (enforcing)
 src/jev_notice.py        PostToolUse — failure notice (enforcing, injects text)
 src/jev_finish.py        Stop        — completion check (log-only)
 src/jev_scope.py         PreToolUse  — scope check (log-only, no enforcing mode)
+src/jev_reads.py         PreToolUse  — reads ranker (shadow: logs, changes nothing)
+src/jev_clear.py         UserPromptSubmit — clear advisor (a note to you, never Claude)
+src/jev_tokens.py        where session tokens go, from the transcripts (no Jev)
 tests/test_jev_gate.py   26 fixture payloads, 15 safe and 11 dangerous
 tests/test_jev_notice.py 20 command outputs, 6 clean and 14 containing failures
 tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stops
 tests/test_jev_scope.py  13 pending writes, 8 in scope and 5 out of it (reads the log)
+tests/test_jev_reads.py  chunker and verdict offline, then 6 scored Reads
+tests/test_tokens.py     token accounting against a hand-built transcript
+tests/test_jev_clear.py  offline rules, then 9 prompts: 6 continuations, 3 new tasks
 tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 tests/spike_grep_rank.py    the spike for #10: ranking grep hits. Measured, not built
 install.sh               wire into / out of settings.json
 CONTRIBUTING.md          setup, how to report a bad call, threshold rules
 assets/logo.svg          icon, dark background (logo-light.svg for light)
-verify.sh                prove all four hooks are on and working
+jev                      the menu: every tool below, numbered
+verify.sh                prove every hook is on and working
+tokens.sh                token report: what entered the context, and what it carried
 report.sh                read the audit log: what fired, and would it have been right
 redact.sh                strip a log so it can be shared (--audit says what goes)
 src/jev_logs.py          load, merge, filter and redact logs; shared by report/redact
