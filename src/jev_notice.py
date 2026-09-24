@@ -39,6 +39,7 @@ The JEV_GATE_* spellings of the shared vars still work. See jev_client.LEGACY_EN
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -256,7 +257,14 @@ def recovery_hint(kind: str | None) -> str | None:
     return f" {hint}" if hint else None
 
 
-def emit(context: str | None) -> None:
+# A successful Bash call fires PostToolUse; a failed one fires
+# PostToolUseFailure instead, never both. This hook was registered for the first
+# only, so for its whole life it never saw a command that exited non-zero -- the
+# plain failures every failure_kind hint is written for. It now answers both.
+EVENTS = ("PostToolUse", "PostToolUseFailure")
+
+
+def emit(context: str | None, event: str = "PostToolUse") -> None:
     """Inject additional context, or nothing at all."""
     if context is None:
         sys.exit(0)
@@ -264,7 +272,7 @@ def emit(context: str | None) -> None:
         json.dumps(
             {
                 "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
+                    "hookEventName": event,
                     "additionalContext": context,
                 }
             }
@@ -273,20 +281,75 @@ def emit(context: str | None) -> None:
     sys.exit(0)
 
 
+def failure_text(payload: dict) -> str:
+    """The error string a PostToolUseFailure payload carries.
+
+    The docs name it tool_error; the field has also been seen as error. Read
+    both rather than guess, since a wrong guess reads as "no output" and the
+    hook goes quiet on exactly the calls it now exists to see.
+    """
+    for field in ("tool_error", "error"):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, dict):
+            return json.dumps(value)[:MAX_HEAD]
+    return ""
+
+
+# Over ~30KB, Claude Code cuts stdout at 30000 characters, saves the whole output
+# to this file, and shows the agent a 2KB preview. The cut drops the end -- where
+# test summaries live -- so read the file when it is there.
+def persisted_output(resp: dict) -> str | None:
+    path = resp.get("persistedOutputPath")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        with open(path, errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
 def tool_output(payload: dict) -> str:
-    """Pull the Bash result text out of a PostToolUse payload.
+    """Pull the Bash result text out of a PostToolUse or PostToolUseFailure payload.
 
     tool_response is a dict for Bash (stdout/stderr/interrupted) but hook
     payloads vary by tool and by Claude Code version, so fall back to a string.
     """
+    if payload.get("hook_event_name") == "PostToolUseFailure":
+        return failure_text(payload)
     resp = payload.get("tool_response")
     if isinstance(resp, str):
         return resp
     if isinstance(resp, dict):
+        full = persisted_output(resp)
+        if full is not None:
+            return full
         parts = [str(resp.get(k, "")) for k in ("stdout", "stderr", "output", "content")]
         joined = "\n".join(p for p in parts if p.strip())
         return joined or json.dumps(resp)[:MAX_HEAD]
     return ""
+
+
+def exit_status(payload: dict) -> str:
+    """What is actually known about how the command exited.
+
+    Real Bash results carry no exit_code field, so reading one produced "unknown"
+    on every production call while the fixtures, which did pass one, said 0 or 1.
+    The event itself is the signal: PostToolUse means the harness counted the
+    call a success, and a failure's error string opens with "Exit code N".
+    """
+    resp = payload.get("tool_response")
+    if isinstance(resp, dict) and "exit_code" in resp:
+        return str(resp["exit_code"])
+    if payload.get("hook_event_name") == "PostToolUseFailure":
+        match = re.search(r"Exit code (\d+)", failure_text(payload)[:200])
+        return match.group(1) if match else "non-zero (the command failed)"
+    note = resp.get("returnCodeInterpretation") if isinstance(resp, dict) else None
+    if note:
+        return f"non-zero, which the harness treated as success: {note}"
+    return "0"
 
 
 def truncate(text: str) -> str:
@@ -299,15 +362,20 @@ def truncate(text: str) -> str:
 def build_state(payload: dict, output: str) -> str:
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "")
+    sections = [
+        f"Command that was run:\n{command}",
+        f"Exit code: {exit_status(payload)}",
+    ]
     resp = payload.get("tool_response")
-    code = resp.get("exit_code", "unknown") if isinstance(resp, dict) else "unknown"
-    return "\n\n".join(
-        [
-            f"Command that was run:\n{command}",
-            f"Exit code: {code}",
-            f"Output:\n{truncate(output)}",
-        ]
-    )
+    if isinstance(resp, dict) and persisted_output(resp) is not None:
+        # The whole point of exit_status_misleads: the agent is looking at far
+        # less than this, so a failure anywhere past the preview is one it missed.
+        sections.append(
+            "Note: this output was too large to show in full. The agent saw only "
+            "a 2KB preview of the start of it."
+        )
+    sections.append(f"Output:\n{truncate(output)}")
+    return "\n\n".join(sections)
 
 
 def main() -> None:
@@ -321,6 +389,9 @@ def main() -> None:
     payload = read_payload()
     if payload is None or payload.get("tool_name") != "Bash":
         emit(None)
+    event = payload.get("hook_event_name") or "PostToolUse"
+    if event not in EVENTS:
+        emit(None)
 
     output = tool_output(payload)
     if len(output.strip()) < MIN_OUTPUT_CHARS:
@@ -330,7 +401,7 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(state, QUESTIONS, key)
     except JevError as exc:
-        log({"hook": "notice", "error": str(exc)})
+        log({"hook": "notice", "event": event, "error": str(exc)})
         emit(None)
 
     fail = scores.get("output_shows_failure", 0.0)
@@ -346,6 +417,7 @@ def main() -> None:
     log(
         {
             "hook": "notice",
+            "event": event,
             "scores": scores,
             "latency_ms": elapsed_ms,
             "usage": usage,
@@ -368,12 +440,14 @@ def main() -> None:
             "misleading). The command may have exited 0, or the failure may be "
             "truncated or buried. Read the output again before describing this as "
             "working, and do not report success unless you can point to the line "
-            f"that shows it.{hint or ''}"
+            f"that shows it.{hint or ''}",
+            event,
         )
     emit(
         f"{tag('notice', elapsed_ms)} This output reports a failure "
         f"(p={fail:.2f}). Address it or say so plainly; do not describe this step "
-        f"as successful.{hint or ''}"
+        f"as successful.{hint or ''}",
+        event,
     )
 
 

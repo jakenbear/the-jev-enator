@@ -56,6 +56,7 @@ SAFE_FIELDS = frozenset(
         "flagged",
         "noticed",
         "emphatic",
+        "event",
         "kind",
         "kind_p",
         "kind_margin",

@@ -72,6 +72,10 @@ jobs:
         run: python3 tests/test_jev_scope.py
         env:
           JEV_REPLAY: tests/cassette.json
+      - name: Hook state matches real payloads
+        # No key, no network. The replay suites only prove a fixture scores as
+        # recorded; this proves the fixture looks like what Claude Code sends.
+        run: python3 tests/test_state.py
       - name: Installer
         # Runs install.sh against a throwaway HOME. No key and no network, so it
         # belongs in the replay job. This is the only coverage of the code that
