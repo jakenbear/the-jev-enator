@@ -64,6 +64,14 @@ SAFE_FIELDS = frozenset(
         "skipped",
         "state_chars",
         "explained_by_continuation",
+        # jev_reads: the verdict and its numbers. Line ranges and counts, no text.
+        "top",
+        "margin",
+        "winner",
+        "region",
+        "saved_tokens",
+        "lines",
+        "chunks",
         "ts",
     }
 )
@@ -84,7 +92,7 @@ SAFE_FIELDS = frozenset(
 # audit() reports it and nobody later mistakes the silence for an oversight. It is
 # dropped even under --keep-commands, because it contains request text.
 SENSITIVE_FIELDS = frozenset(
-    {"cwd", "command", "state_head", "state_tail", "request_head", "path"}
+    {"cwd", "command", "state_head", "state_tail", "request_head", "path", "file", "session_id", "tool_use_id"}
 )
 
 # 'error' is its own case. The text is ours, but an exception message can quote a

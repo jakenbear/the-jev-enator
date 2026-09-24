@@ -14,6 +14,7 @@ GATE="$REPO/src/jev_gate.py"
 FINISH="$REPO/src/jev_finish.py"
 NOTICE="$REPO/src/jev_notice.py"
 SCOPE="$REPO/src/jev_scope.py"
+READS="$REPO/src/jev_reads.py"
 PASS=0
 
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
@@ -43,7 +44,7 @@ fi
 # 0b. Each hook must survive being run with junk on stdin. This catches a syntax
 # error, a bad import, or a missing sibling module -- all of which otherwise show
 # up only as a gate that silently stopped gating.
-for spec in "$GATE:danger gate" "$NOTICE:failure notice" "$FINISH:completion check" "$SCOPE:scope check"; do
+for spec in "$GATE:danger gate" "$NOTICE:failure notice" "$FINISH:completion check" "$SCOPE:scope check" "$READS:reads ranker"; do
   IFS=':' read -r script label <<<"$spec"
   ERR="$(echo 'not json' | python3 "$script" 2>&1 >/dev/null)"
   if [[ -z "$ERR" ]]; then
@@ -67,7 +68,7 @@ sys.exit(0 if any(x.get('command')=='$2' for e in h for x in e.get('hooks',[])) 
 " 2>/dev/null
 }
 
-for spec in "PreToolUse:$GATE:danger gate" "PostToolUse:$NOTICE:failure notice" "PostToolUseFailure:$NOTICE:failure notice (failed commands)" "Stop:$FINISH:completion check" "PreToolUse:$SCOPE:scope check"; do
+for spec in "PreToolUse:$GATE:danger gate" "PostToolUse:$NOTICE:failure notice" "PostToolUseFailure:$NOTICE:failure notice (failed commands)" "Stop:$FINISH:completion check" "PreToolUse:$SCOPE:scope check" "PreToolUse:$READS:reads ranker"; do
   IFS=':' read -r event script label <<<"$spec"
   if registered "$event" "$script"; then
     ok "$label registered as a $event hook"
@@ -205,6 +206,12 @@ else
   ok "scope check is log-only (no enforcing mode exists)"
 fi
 
+if [[ "${JEV_READS_OFF:-}" == "1" ]]; then
+  note "JEV_READS_OFF=1 — the reads ranker is off (the other hooks still run)"
+else
+  ok "reads ranker is in shadow mode (logs suggestions, changes no read)"
+fi
+
 # 5. Disabled by env?
 if [[ "${JEV_DISABLE:-}" == "1" || "${JEV_GATE_DISABLE:-}" == "1" ]]; then
   bad "JEV_DISABLE=1 is set — every hook is bypassed"
@@ -258,7 +265,7 @@ for line in open(sys.argv[1]):
 errs = [r for r in rows if "error" in r]
 total_toks = 0
 
-for hook, label in (("gate", "danger gate"), ("notice", "failure notice"), ("finish", "completion check"), ("scope", "scope check")):
+for hook, label in (("gate", "danger gate"), ("notice", "failure notice"), ("finish", "completion check"), ("scope", "scope check"), ("reads", "reads ranker")):
     scored = [r for r in rows if r.get("hook") == hook and "scores" in r]
     if not scored:
         print(f"  {label:18} no activity yet")

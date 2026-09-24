@@ -30,7 +30,7 @@ be too slow and too expensive to sit in the hot path.
 > without this, what Jev is doing that's interesting, and what a year of it cost
 > (\$0.14).
 
-### 🎯 Four hooks so far
+### 🎯 Five hooks so far
 
 | | Hook | Event | What it does | Default |
 | :-: | --- | --- | --- | --- |
@@ -38,9 +38,10 @@ be too slow and too expensive to sit in the hot path.
 | 🔔 | **failure notice** | `PostToolUse` | Tells the agent when command output contains a failure | 🔴 **enforcing** |
 | ✅ | **completion check** | `Stop` | Judges whether Claude actually finished its turn | 🟡 **log-only** |
 | 🔍 | **scope check** | `PreToolUse` | Notes when a write isn't part of what you asked for | ⚪ **log-only, always** |
+| 📖 | **reads ranker** | `PreToolUse` | Ranks which part of a big file a whole-file Read actually needed | 👻 **shadow** |
 
 The first two stop bad things. The failure notice is the only one that makes the
-agent *better*, and it's the most interesting of the four.
+agent *better*, and it's the most interesting of the five.
 
 ⚪ **The scope check has no enforcing mode.** Not a default awaiting a flag —
 there is no flag. It answers "did anyone ask for this," which is the scope-creep
@@ -125,10 +126,14 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 16 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 19 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
+
+Everything else is one menu away: `./jev` (status, reports, token report,
+hooks on/off, tests, install, redact). Each item runs the same script you could
+run by hand; `./jev <item>` skips the menu, e.g. `./jev tokens --since 2026-09-01`.
 
 ---
 
@@ -149,7 +154,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 16 OKs
+./verify.sh                   # should print 19 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -183,7 +188,7 @@ To remove it:
 ./install.sh --uninstall
 ```
 
-That unregisters all four hooks and removes the key and log path it added. Your
+That unregisters every hook and removes the key and log path it added. Your
 original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
@@ -364,8 +369,11 @@ per turn.
 export JEV_NOTICE_OFF=1       # failure notice off, others stay on
 export JEV_FINISH_OFF=1       # completion check off, others stay on
 export JEV_SCOPE_OFF=1        # scope check off, others stay on
-export JEV_DISABLE=1          # all four off for this shell
-./install.sh --uninstall      # all four off for good
+export JEV_READS_OFF=1        # reads ranker off, others stay on
+export JEV_GATE_OFF=1         # danger gate off, others stay on
+export JEV_DISABLE=1          # every hook off for this shell
+./install.sh --uninstall      # every hook off for good
+./jev hooks                   # toggle any of these in settings.json
 ```
 
 Or set any of them in the `env` block of `settings.json` to make it persistent.
@@ -377,16 +385,18 @@ when you don't want to spend the tokens.
 
 | Variable | Read by | What it does |
 | --- | --- | --- |
-| `TYPESAFE_API_KEY` | all four | Required. Without it every hook no-ops. |
-| `JEV_LOG` | all four | Path to the JSONL audit log. Set by `install.sh`. |
-| `JEV_DISABLE` | all four | `1` bypasses every hook in this repo. |
-| `JEV_REPLAY` | all four | Cassette path; runs offline against recorded answers. |
-| `JEV_RECORD` | all four | Appends live answers to a file, for re-recording a cassette. |
+| `TYPESAFE_API_KEY` | all | Required. Without it every hook no-ops. |
+| `JEV_LOG` | all | Path to the JSONL audit log. Set by `install.sh`. |
+| `JEV_DISABLE` | all | `1` bypasses every hook in this repo. |
+| `JEV_REPLAY` | all | Cassette path; runs offline against recorded answers. |
+| `JEV_RECORD` | all | Appends live answers to a file, for re-recording a cassette. |
 | `JEV_GATE_EXTRA_TOOLS` | gate | Comma-separated extra tool names to gate. Keeps `GATE`: it really is gate-only. |
 | `JEV_NOTICE_OFF` | notice | `1` disables just the failure notice. |
 | `JEV_FINISH_ENFORCE` | finish | `1` lets the completion check block. Default is log-only. |
 | `JEV_FINISH_OFF` | finish | `1` disables just the completion check. |
 | `JEV_SCOPE_OFF` | scope | `1` disables just the scope check. |
+| `JEV_READS_OFF` | reads | `1` disables just the reads ranker. |
+| `JEV_GATE_OFF` | gate | `1` disables just the danger gate. |
 
 The first five were `JEV_GATE_*` before, which was wrong rather than merely
 stale — `JEV_GATE_DISABLE` also silenced the notice and the completion check.
@@ -821,7 +831,31 @@ the cheap definition of "the plan" failing, not scope creep caught. If most flag
 land there, the fix is reading the plan from `ExitPlanMode` — which this hook
 can't see today — rather than moving a threshold.
 
-Turn it off on its own with `JEV_SCOPE_OFF=1`; the other three keep running.
+Turn it off on its own with `JEV_SCOPE_OFF=1`; the others keep running.
+
+### 📖 Reads ranker — `src/jev_reads.py`
+
+`./tokens.sh` found where the input tokens actually go, and it isn't log dumps.
+It's whole-file Reads: a 10k-token file read once is re-read as part of the
+context on every later call — 100–200 of them — until compaction. One read
+carried 1.4M tokens. The agent usually needed one function.
+
+Before a `Read` of a file of 300+ lines with no `offset`/`limit`, it splits the
+file at top-level definitions (headings, for markdown; fixed windows otherwise)
+and asks **one** `choice` question: given your last three messages, which chunk
+does this read need? The distribution over chunks *is* the ranking — up to 20
+chunks in one ~350ms call. `whole_file` is one of the options, so an overview, a
+review, or a change to every function has somewhere to go instead of being forced
+onto a chunk. It names a region only at p ≥ 0.40 with a 0.20 margin.
+
+**Shadow mode: it changes nothing.** It logs what it would have narrowed to and
+the tokens that saves. Narrowing fails *unsafe* — an agent doesn't know what it
+didn't see — so the log comes before any nudge. Read it with `./jev reads`: for
+each suggestion, was that region the one the work needed?
+
+**It sends file excerpts to typesafe.ai**: the first ~320 characters of each
+chunk, plus your last three messages. The other hooks send commands and output;
+this one sends source. If that's not OK for a repo, `JEV_READS_OFF=1`.
 
 ### 🎛️ Tuning
 
@@ -912,17 +946,23 @@ src/jev_gate.py          PreToolUse  — danger gate (enforcing)
 src/jev_notice.py        PostToolUse — failure notice (enforcing, injects text)
 src/jev_finish.py        Stop        — completion check (log-only)
 src/jev_scope.py         PreToolUse  — scope check (log-only, no enforcing mode)
+src/jev_reads.py         PreToolUse  — reads ranker (shadow: logs, changes nothing)
+src/jev_tokens.py        where session tokens go, from the transcripts (no Jev)
 tests/test_jev_gate.py   26 fixture payloads, 15 safe and 11 dangerous
 tests/test_jev_notice.py 20 command outputs, 6 clean and 14 containing failures
 tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stops
 tests/test_jev_scope.py  13 pending writes, 8 in scope and 5 out of it (reads the log)
+tests/test_jev_reads.py  chunker and verdict offline, then 6 scored Reads
+tests/test_tokens.py     token accounting against a hand-built transcript
 tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 tests/spike_grep_rank.py    the spike for #10: ranking grep hits. Measured, not built
 install.sh               wire into / out of settings.json
 CONTRIBUTING.md          setup, how to report a bad call, threshold rules
 assets/logo.svg          icon, dark background (logo-light.svg for light)
-verify.sh                prove all four hooks are on and working
+jev                      the menu: every tool below, numbered
+verify.sh                prove every hook is on and working
+tokens.sh                token report: what entered the context, and what it carried
 report.sh                read the audit log: what fired, and would it have been right
 redact.sh                strip a log so it can be shared (--audit says what goes)
 src/jev_logs.py          load, merge, filter and redact logs; shared by report/redact

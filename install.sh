@@ -15,6 +15,7 @@ GATE="$REPO/src/jev_gate.py"
 FINISH="$REPO/src/jev_finish.py"
 NOTICE="$REPO/src/jev_notice.py"
 SCOPE="$REPO/src/jev_scope.py"
+READS="$REPO/src/jev_reads.py"
 
 # Refuse to install against an interpreter that cannot run the hooks. On 3.9 the
 # annotations in jev_client raise TypeError at import, and a hook that dies on
@@ -45,7 +46,7 @@ fi
 # recovery instruction pointing at a file that does not exist is worse than none.
 BACKUP="$SETTINGS.bak-jevenator"
 
-chmod +x "$GATE" "$FINISH" "$NOTICE" "$SCOPE"
+chmod +x "$GATE" "$FINISH" "$NOTICE" "$SCOPE" "$READS" "$REPO/jev"
 cp "$SETTINGS" "$BACKUP"
 
 MODE="install"
@@ -83,6 +84,12 @@ if [[ -z "$SCOPE_MATCHER" ]]; then
   exit 1
 fi
 
+READS_MATCHER="$(python3 "$READS" --matcher)"
+if [[ -z "$READS_MATCHER" ]]; then
+  echo "Could not read the watched tool list from $READS --matcher." >&2
+  exit 1
+fi
+
 # Ask the client where to log rather than hardcoding a filename, so that a
 # machine with a pre-rename ~/jev-gate.jsonl keeps appending to it. Writing the
 # new name into settings.json for an existing user would leave their history in a
@@ -94,8 +101,8 @@ if [[ -z "$LOG" ]]; then
   exit 1
 fi
 
-MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" KEY="$KEY" SETTINGS="$SETTINGS" \
-GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" LOG="$LOG" python3 - <<'PY'
+MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" READS="$READS" KEY="$KEY" SETTINGS="$SETTINGS" \
+GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" READS_MATCHER="$READS_MATCHER" LOG="$LOG" python3 - <<'PY'
 import json, os, pathlib
 
 mode = os.environ["MODE"]
@@ -115,6 +122,8 @@ WIRING = [
     # Bash command (paying for a call it has no useful state for) or narrow the
     # gate to file writes, which would stop gating Bash entirely.
     ("PreToolUse", os.environ["SCOPE"], os.environ["SCOPE_MATCHER"]),
+    # Its own entry for the same reason: Read is gated by nothing else.
+    ("PreToolUse", os.environ["READS"], os.environ["READS_MATCHER"]),
 ]
 
 data = json.loads(path.read_text())

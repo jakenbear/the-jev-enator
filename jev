@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+"""The Jev-enator: one menu for every tool in this repo.
+
+  ./jev                 interactive menu
+  ./jev status          is everything on and working (verify.sh)
+  ./jev report [args]   what the hooks decided (report.sh)
+  ./jev tokens [args]   where the session tokens go (tokens.sh)
+  ./jev reads           what the reads ranker would have narrowed, shadow log
+  ./jev hooks           turn single hooks on and off
+  ./jev test            every offline suite, against the recorded responses
+  ./jev install         install or reinstall
+  ./jev uninstall       remove the hooks
+  ./jev redact [args]   make the log safe to share (redact.sh)
+
+Every item runs the same script you could run by hand; the menu adds nothing a
+script does not do, so nothing here can drift from what the README documents.
+Stdlib only.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent
+SRC = REPO / "src"
+SETTINGS = Path.home() / ".claude" / "settings.json"
+BACKUP = SETTINGS.with_name("settings.json.bak-jevenator")
+
+sys.path.insert(0, str(SRC))
+
+COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def paint(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if COLOR else text
+
+
+def bold(t):
+    return paint(t, "1")
+
+
+def dim(t):
+    return paint(t, "2")
+
+
+def green(t):
+    return paint(t, "32")
+
+
+def red(t):
+    return paint(t, "31")
+
+
+def cyan(t):
+    return paint(t, "36")
+
+
+# (env var, what it controls, value that means "off"). JEV_FINISH_ENFORCE is the
+# odd one out: setting it turns something ON, and it is the only switch here that
+# lets a hook block work, so it is shown separately and named for what it does.
+SWITCHES = [
+    ("JEV_GATE_OFF", "danger gate        asks before destructive commands"),
+    ("JEV_NOTICE_OFF", "failure notice     flags failures buried in output"),
+    ("JEV_FINISH_OFF", "completion check   logs whether the work was finished"),
+    ("JEV_SCOPE_OFF", "scope check        logs edits outside the request"),
+    ("JEV_READS_OFF", "reads ranker       logs which part of a file a Read needed"),
+]
+ENFORCE = "JEV_FINISH_ENFORCE"
+DISABLE = "JEV_DISABLE"
+
+
+def header() -> None:
+    from jev_client import ART, BRAND
+
+    width = 52
+    print()
+    print(cyan("  " + "━" * width))
+    print(cyan("  ┃") + bold(f"  {ART}  {BRAND}".ljust(width - 2)) + cyan("┃"))
+    print(cyan("  ┃") + dim("  calibrated checks for Claude Code".ljust(width - 2)) + cyan("┃"))
+    print(cyan("  " + "━" * width))
+
+
+def load_settings() -> dict:
+    try:
+        return json.loads(SETTINGS.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def settings_env() -> dict:
+    env = load_settings().get("env")
+    return env if isinstance(env, dict) else {}
+
+
+def log_path() -> str:
+    """Same resolution order as verify.sh and report.sh."""
+    import jev_client
+
+    env = settings_env()
+    return env.get("JEV_LOG") or env.get("JEV_GATE_LOG") or jev_client.default_log_path()
+
+
+def installed() -> bool:
+    hooks = load_settings().get("hooks") or {}
+    ours = str(SRC / "jev_gate.py")
+    return any(
+        h.get("command") == ours
+        for entries in hooks.values()
+        if isinstance(entries, list)
+        for e in entries
+        for h in e.get("hooks", [])
+    )
+
+
+def status_line() -> None:
+    env = settings_env()
+    if not SETTINGS.exists():
+        print(red("  Claude Code settings not found -- start Claude Code once"))
+        return
+    state = green("installed") if installed() else red("not installed")
+    off = [name.split()[0] for var, name in SWITCHES if env.get(var) == "1"]
+    parts = [f"hooks {state}"]
+    if env.get(DISABLE) == "1":
+        parts.append(red("ALL HOOKS DISABLED"))
+    elif off:
+        parts.append(f"off: {', '.join(off)}")
+    parts.append("completion check " + (red("ENFORCING") if env.get(ENFORCE) == "1" else "log-only"))
+    print("  " + dim(" · ").join(parts))
+
+
+def run(cmd: list, env_extra: dict | None = None) -> int:
+    print(dim("  $ " + " ".join(str(c) for c in cmd)))
+    print()
+    try:
+        return subprocess.call([str(c) for c in cmd], env={**os.environ, **(env_extra or {})})
+    except KeyboardInterrupt:
+        return 130
+
+
+def ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        return "q"
+
+
+# ---------------------------------------------------------------------------
+# Actions. Each takes the argv after its subcommand name.
+
+
+def do_status(args):
+    return run([REPO / "verify.sh", *args])
+
+
+def do_report(args):
+    return run([REPO / "report.sh", *args])
+
+
+def do_tokens(args):
+    if not args and sys.stdin.isatty():
+        since = ask("  since (YYYY-MM-DD, Enter for all history): ")
+        args = ["--since", since] if since and since != "q" else []
+    return run([REPO / "tokens.sh", *args])
+
+
+def do_reads(args):
+    return run([sys.executable, SRC / "jev_reads.py", "--report", *args], {"JEV_LOG": log_path()})
+
+
+def write_env(changes: dict) -> None:
+    """Apply changes to settings.json env, after backing it up. None removes."""
+    data = load_settings()
+    if not data and SETTINGS.exists():
+        raise SystemExit(red(f"  {SETTINGS} is not valid JSON; refusing to write it."))
+    shutil.copy(SETTINGS, BACKUP)
+    env = data.setdefault("env", {})
+    for key, value in changes.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    SETTINGS.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def do_hooks(args):
+    if not SETTINGS.exists():
+        print(red(f"  No {SETTINGS}. Start Claude Code once, then install."))
+        return 1
+    changed = False
+    while True:
+        env = settings_env()
+        print()
+        print(bold("  Hooks") + dim("  (settings.json env; restart Claude Code to apply)"))
+        for i, (var, label) in enumerate(SWITCHES, 1):
+            on = env.get(var) != "1"
+            print(f"  {bold(str(i))}  {green(' ON') if on else red('OFF')}  {label}")
+        n = len(SWITCHES)
+        enforcing = env.get(ENFORCE) == "1"
+        print(f"  {bold(str(n + 1))}  {red('YES') if enforcing else ' no'}  completion check may BLOCK turns")
+        disabled = env.get(DISABLE) == "1"
+        print(f"  {bold(str(n + 2))}  {red('YES') if disabled else ' no'}  disable every hook at once")
+        print(dim("     Enter to go back"))
+        choice = ask("  toggle: ")
+        if choice in ("", "q", "b"):
+            break
+        if not choice.isdigit() or not 1 <= int(choice) <= n + 2:
+            print(red("  pick a number from the list"))
+            continue
+        k = int(choice)
+        if k <= n:
+            var = SWITCHES[k - 1][0]
+            write_env({var: None if env.get(var) == "1" else "1"})
+        elif k == n + 1:
+            if not enforcing and ask("  This lets the completion check block Claude from stopping. Sure? [y/N] ").lower() != "y":
+                continue
+            write_env({ENFORCE: None if enforcing else "1"})
+        else:
+            write_env({DISABLE: None if disabled else "1"})
+        changed = True
+    if changed:
+        print(f"  Saved. Backup at {BACKUP}. {bold('Restart Claude Code to apply.')}")
+    return 0
+
+
+# The offline suites: replay against the cassette, or pure. Same list CI runs.
+SUITES = [
+    ("danger gate", "test_jev_gate.py", True),
+    ("failure notice", "test_jev_notice.py", True),
+    ("completion check", "test_jev_finish.py", True),
+    ("scope check", "test_jev_scope.py", True),
+    ("reads ranker", "test_jev_reads.py", True),
+    ("hook state vs real payloads", "test_state.py", False),
+    ("token accounting", "test_tokens.py", False),
+    ("installer", "test_install.py", False),
+    ("log redaction", "test_jev_logs.py", False),
+]
+
+
+def do_test(args):
+    verbose = "-v" in args
+    results = []
+    for label, suite, replay in SUITES:
+        env = {**os.environ, "JEV_LOG": os.devnull}
+        env.pop("TYPESAFE_API_KEY", None)  # offline means offline: no spend, no drift
+        if replay:
+            env["JEV_REPLAY"] = str(REPO / "tests" / "cassette.json")
+        print(f"  {label:30}", end="", flush=True)
+        proc = subprocess.run(
+            [sys.executable, str(REPO / "tests" / suite)], capture_output=True, text=True, env=env
+        )
+        ok = proc.returncode == 0
+        results.append(ok)
+        print(green("pass") if ok else red("FAIL"))
+        if not ok or verbose:
+            tail = [l for l in proc.stdout.splitlines() if "FAIL" in l] or proc.stdout.splitlines()[-5:]
+            for line in tail[:8]:
+                print(dim(f"      {line.strip()}"))
+            if proc.stderr.strip() and not ok:
+                print(dim(f"      {proc.stderr.strip().splitlines()[-1]}"))
+    print()
+    print(green(f"  all {len(results)} suites pass") if all(results) else red(f"  {results.count(False)} suite(s) failed"))
+    return 0 if all(results) else 1
+
+
+def do_install(args):
+    return run([REPO / "install.sh", *args])
+
+
+def do_uninstall(args):
+    if sys.stdin.isatty() and ask("  Remove every Jev-enator hook from Claude Code? [y/N] ").lower() != "y":
+        return 0
+    return run([REPO / "install.sh", "--uninstall", *args])
+
+
+def do_redact(args):
+    if not args and sys.stdin.isatty():
+        out = ask("  write the share-safe copy to (Enter = print a dry-run audit instead): ")
+        args = ["-o", out] if out and out != "q" else ["--audit"]
+    return run([REPO / "redact.sh", *args])
+
+
+MENU = [
+    ("status", "Status", "is every hook on and working", do_status),
+    ("report", "Audit report", "what the hooks decided, and would they have been right", do_report),
+    ("tokens", "Token report", "where your Claude Code tokens actually go", do_tokens),
+    ("reads", "Reads ranker log", "what it would have narrowed, and what that saves", do_reads),
+    ("hooks", "Hooks on/off", "turn single hooks on or off", do_hooks),
+    ("test", "Run offline tests", "every suite, recorded responses, no spend", do_test),
+    ("install", "Install / reinstall", "wire the hooks into Claude Code", do_install),
+    ("uninstall", "Uninstall", "remove the hooks, keep the repo", do_uninstall),
+    ("redact", "Redact log", "make the audit log safe to share", do_redact),
+]
+
+
+def menu() -> int:
+    while True:
+        header()
+        status_line()
+        print()
+        for i, (_, title, blurb, _) in enumerate(MENU, 1):
+            print(f"  {bold(cyan(str(i)))}  {title:22} {dim(blurb)}")
+        print(f"  {bold(cyan('q'))}  Quit")
+        print()
+        choice = ask("  > ").lower()
+        if choice in ("q", "quit", "exit"):
+            return 0
+        action = None
+        if choice.isdigit() and 1 <= int(choice) <= len(MENU):
+            action = MENU[int(choice) - 1][3]
+        else:
+            action = next((fn for name, _, _, fn in MENU if name == choice), None)
+        if not action:
+            print(red(f"  no item {choice!r}"))
+            continue
+        print()
+        action([])
+        print()
+        if ask(dim("  Enter for the menu, q to quit ")).lower() == "q":
+            return 0
+
+
+def main(argv: list) -> int:
+    if not argv:
+        if not sys.stdin.isatty():
+            print(__doc__.strip())
+            return 0
+        return menu()
+    name, rest = argv[0], argv[1:]
+    if name in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    for cmd, _, _, fn in MENU:
+        if cmd == name:
+            return fn(rest)
+    print(f"unknown command {name!r}. Try ./jev --help", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)
