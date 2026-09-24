@@ -72,6 +72,9 @@ SAFE_FIELDS = frozenset(
         "saved_tokens",
         "lines",
         "chunks",
+        # jev_clear
+        "context_tokens",
+        "notified",
         "ts",
     }
 )

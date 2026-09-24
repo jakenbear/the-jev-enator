@@ -6,6 +6,7 @@
   ./jev report [args]   what the hooks decided (report.sh)
   ./jev tokens [args]   where the session tokens go (tokens.sh)
   ./jev reads           what the reads ranker would have narrowed, shadow log
+  ./jev clear           which prompts the clear advisor called a new task
   ./jev hooks           turn single hooks on and off
   ./jev test            every offline suite, against the recorded responses
   ./jev install         install or reinstall
@@ -67,6 +68,8 @@ SWITCHES = [
     ("JEV_FINISH_OFF", "completion check   logs whether the work was finished"),
     ("JEV_SCOPE_OFF", "scope check        logs edits outside the request"),
     ("JEV_READS_OFF", "reads ranker       logs which part of a file a Read needed"),
+    ("JEV_CLEAR_OFF", "clear advisor      judges each prompt: new task? /clear?"),
+    ("JEV_CLEAR_QUIET", "clear-notes        shows you the /clear note (off = log only)"),
 ]
 ENFORCE = "JEV_FINISH_ENFORCE"
 DISABLE = "JEV_DISABLE"
@@ -170,6 +173,10 @@ def do_reads(args):
     return run([sys.executable, SRC / "jev_reads.py", "--report", *args], {"JEV_LOG": log_path()})
 
 
+def do_clear(args):
+    return run([sys.executable, SRC / "jev_clear.py", "--report", *args], {"JEV_LOG": log_path()})
+
+
 def write_env(changes: dict) -> None:
     """Apply changes to settings.json env, after backing it up. None removes."""
     data = load_settings()
@@ -232,6 +239,7 @@ SUITES = [
     ("completion check", "test_jev_finish.py", True),
     ("scope check", "test_jev_scope.py", True),
     ("reads ranker", "test_jev_reads.py", True),
+    ("clear advisor", "test_jev_clear.py", True),
     ("hook state vs real payloads", "test_state.py", False),
     ("token accounting", "test_tokens.py", False),
     ("installer", "test_install.py", False),
@@ -287,6 +295,7 @@ MENU = [
     ("report", "Audit report", "what the hooks decided, and would they have been right", do_report),
     ("tokens", "Token report", "where your Claude Code tokens actually go", do_tokens),
     ("reads", "Reads ranker log", "what it would have narrowed, and what that saves", do_reads),
+    ("clear", "Clear advisor log", "which prompts it called a new task, and the context", do_clear),
     ("hooks", "Hooks on/off", "turn single hooks on or off", do_hooks),
     ("test", "Run offline tests", "every suite, recorded responses, no spend", do_test),
     ("install", "Install / reinstall", "wire the hooks into Claude Code", do_install),

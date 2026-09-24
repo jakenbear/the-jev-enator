@@ -30,7 +30,7 @@ be too slow and too expensive to sit in the hot path.
 > without this, what Jev is doing that's interesting, and what a year of it cost
 > (\$0.14).
 
-### 🎯 Five hooks so far
+### 🎯 Six hooks so far
 
 | | Hook | Event | What it does | Default |
 | :-: | --- | --- | --- | --- |
@@ -39,9 +39,10 @@ be too slow and too expensive to sit in the hot path.
 | ✅ | **completion check** | `Stop` | Judges whether Claude actually finished its turn | 🟡 **log-only** |
 | 🔍 | **scope check** | `PreToolUse` | Notes when a write isn't part of what you asked for | ⚪ **log-only, always** |
 | 📖 | **reads ranker** | `PreToolUse` | Ranks which part of a big file a whole-file Read actually needed | 👻 **shadow** |
+| 🧹 | **clear advisor** | `UserPromptSubmit` | Tells *you* when a prompt starts a new task in a big context, so `/clear` pays | 💬 **note to you only** |
 
 The first two stop bad things. The failure notice is the only one that makes the
-agent *better*, and it's the most interesting of the five.
+agent *better*, and it's the most interesting of the six.
 
 ⚪ **The scope check has no enforcing mode.** Not a default awaiting a flag —
 there is no flag. It answers "did anyone ask for this," which is the scope-creep
@@ -126,7 +127,7 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 19 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 22 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
@@ -154,7 +155,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 19 OKs
+./verify.sh                   # should print 22 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -371,6 +372,8 @@ export JEV_FINISH_OFF=1       # completion check off, others stay on
 export JEV_SCOPE_OFF=1        # scope check off, others stay on
 export JEV_READS_OFF=1        # reads ranker off, others stay on
 export JEV_GATE_OFF=1         # danger gate off, others stay on
+export JEV_CLEAR_OFF=1        # clear advisor off, others stay on
+export JEV_CLEAR_QUIET=1      # clear advisor logs, shows no note
 export JEV_DISABLE=1          # every hook off for this shell
 ./install.sh --uninstall      # every hook off for good
 ./jev hooks                   # toggle any of these in settings.json
@@ -397,6 +400,8 @@ when you don't want to spend the tokens.
 | `JEV_SCOPE_OFF` | scope | `1` disables just the scope check. |
 | `JEV_READS_OFF` | reads | `1` disables just the reads ranker. |
 | `JEV_GATE_OFF` | gate | `1` disables just the danger gate. |
+| `JEV_CLEAR_OFF` | clear | `1` disables just the clear advisor. |
+| `JEV_CLEAR_QUIET` | clear | `1` keeps the clear advisor judging and logging, with no note. |
 
 The first five were `JEV_GATE_*` before, which was wrong rather than merely
 stale — `JEV_GATE_DISABLE` also silenced the notice and the completion check.
@@ -857,6 +862,30 @@ each suggestion, was that region the one the work needed?
 chunk, plus your last three messages. The other hooks send commands and output;
 this one sends source. If that's not OK for a repo, `JEV_READS_OFF=1`.
 
+### 🧹 Clear advisor — `src/jev_clear.py`
+
+Median context on the machine this was measured on: 112k tokens. 92% of calls
+over 60k, 219 auto compactions, zero manual ones. Every call re-reads the whole
+context, so a new task started at 140k pays 140k tokens a call for history it
+never uses. `/clear` fixes that for free, and nobody runs it, because nobody
+notices the moment the task changed.
+
+On each prompt sent with over 60k in context it asks two questions in one call:
+
+| Question | fires at | role |
+| --- | --- | --- |
+| `new_task` | 0.80 | is this separate work a fresh conversation could do as well? |
+| `needs_history` | vetoes above 0.30 | "now add tests", "same for X", "go with 2" — sentences that only mean something with the history |
+
+On fixtures, six continuations scored `new_task` ≤ 0.22 with `needs_history` ≥ 0.96,
+and three new tasks scored ≥ 0.88 / ≤ 0.10.
+
+A hit shows **you** a one-line note — `new task at 140k context -- /clear would save
+~140k tokens per call`. Claude never sees it: no context spent, nothing to derail.
+That's why it's on by default: a wrong note costs a glance. `./jev clear` lists
+every suggestion against its prompt so you can judge them. Under 60k, slash
+commands, and `!` commands never call Jev.
+
 ### 🎛️ Tuning
 
 Edit the thresholds or `QUESTIONS` criteria, then run the matching fixtures:
@@ -947,6 +976,7 @@ src/jev_notice.py        PostToolUse — failure notice (enforcing, injects text
 src/jev_finish.py        Stop        — completion check (log-only)
 src/jev_scope.py         PreToolUse  — scope check (log-only, no enforcing mode)
 src/jev_reads.py         PreToolUse  — reads ranker (shadow: logs, changes nothing)
+src/jev_clear.py         UserPromptSubmit — clear advisor (a note to you, never Claude)
 src/jev_tokens.py        where session tokens go, from the transcripts (no Jev)
 tests/test_jev_gate.py   26 fixture payloads, 15 safe and 11 dangerous
 tests/test_jev_notice.py 20 command outputs, 6 clean and 14 containing failures
@@ -954,6 +984,7 @@ tests/test_jev_finish.py 12 synthetic transcripts, 7 legitimate and 5 early stop
 tests/test_jev_scope.py  13 pending writes, 8 in scope and 5 out of it (reads the log)
 tests/test_jev_reads.py  chunker and verdict offline, then 6 scored Reads
 tests/test_tokens.py     token accounting against a hand-built transcript
+tests/test_jev_clear.py  offline rules, then 9 prompts: 6 continuations, 3 new tasks
 tests/test_install.py    install.sh against settings files it has never seen
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 tests/spike_grep_rank.py    the spike for #10: ranking grep hits. Measured, not built

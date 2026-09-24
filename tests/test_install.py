@@ -31,6 +31,7 @@ NOTICE = str(REPO / "src" / "jev_notice.py")
 FINISH = str(REPO / "src" / "jev_finish.py")
 SCOPE = str(REPO / "src" / "jev_scope.py")
 READS = str(REPO / "src" / "jev_reads.py")
+CLEAR = str(REPO / "src" / "jev_clear.py")
 
 # A hook belonging to someone else, in the same events this repo installs into.
 # Nothing may ever remove or reorder these.
@@ -103,6 +104,7 @@ def case_fresh_install():
             (NOTICE in commands(data, "PostToolUseFailure"), "notice wired to PostToolUseFailure"),
             (FINISH in commands(data, "Stop"), "finish wired to Stop"),
             (READS in commands(data, "PreToolUse"), "reads ranker wired to PreToolUse"),
+            (CLEAR in commands(data, "UserPromptSubmit"), "clear advisor wired to UserPromptSubmit"),
             (
                 any(e.get("matcher") == matcher for e in pre),
                 "PreToolUse matcher matches --matcher output",

@@ -16,6 +16,7 @@ FINISH="$REPO/src/jev_finish.py"
 NOTICE="$REPO/src/jev_notice.py"
 SCOPE="$REPO/src/jev_scope.py"
 READS="$REPO/src/jev_reads.py"
+CLEAR="$REPO/src/jev_clear.py"
 
 # Refuse to install against an interpreter that cannot run the hooks. On 3.9 the
 # annotations in jev_client raise TypeError at import, and a hook that dies on
@@ -46,7 +47,7 @@ fi
 # recovery instruction pointing at a file that does not exist is worse than none.
 BACKUP="$SETTINGS.bak-jevenator"
 
-chmod +x "$GATE" "$FINISH" "$NOTICE" "$SCOPE" "$READS" "$REPO/jev"
+chmod +x "$GATE" "$FINISH" "$NOTICE" "$SCOPE" "$READS" "$CLEAR" "$REPO/jev"
 cp "$SETTINGS" "$BACKUP"
 
 MODE="install"
@@ -101,7 +102,7 @@ if [[ -z "$LOG" ]]; then
   exit 1
 fi
 
-MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" READS="$READS" KEY="$KEY" SETTINGS="$SETTINGS" \
+MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" READS="$READS" CLEAR="$CLEAR" KEY="$KEY" SETTINGS="$SETTINGS" \
 GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" READS_MATCHER="$READS_MATCHER" LOG="$LOG" python3 - <<'PY'
 import json, os, pathlib
 
@@ -124,6 +125,7 @@ WIRING = [
     ("PreToolUse", os.environ["SCOPE"], os.environ["SCOPE_MATCHER"]),
     # Its own entry for the same reason: Read is gated by nothing else.
     ("PreToolUse", os.environ["READS"], os.environ["READS_MATCHER"]),
+    ("UserPromptSubmit", os.environ["CLEAR"], None),
 ]
 
 data = json.loads(path.read_text())

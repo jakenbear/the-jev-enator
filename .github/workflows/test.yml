@@ -37,7 +37,7 @@ jobs:
         # everything, because it emits nothing and the harness proceeds. That is
         # the failure mode most worth a cheap check.
         run: |
-          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py src/jev_reads.py; do
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py src/jev_reads.py src/jev_clear.py; do
             echo 'not json' | python3 "$h" >/dev/null && echo "ok  $h survives junk stdin"
           done
 
@@ -74,6 +74,10 @@ jobs:
           JEV_REPLAY: tests/cassette.json
       - name: Reads ranker
         run: python3 tests/test_jev_reads.py
+        env:
+          JEV_REPLAY: tests/cassette.json
+      - name: Clear advisor
+        run: python3 tests/test_jev_clear.py
         env:
           JEV_REPLAY: tests/cassette.json
       - name: Hook state matches real payloads
@@ -116,7 +120,7 @@ jobs:
         # Empty stdout matters as much as the exit code: anything printed there
         # that is not a valid decision is a payload Claude Code has to parse.
         run: |
-          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py src/jev_reads.py; do
+          for h in src/jev_gate.py src/jev_notice.py src/jev_finish.py src/jev_scope.py src/jev_reads.py src/jev_clear.py; do
             out="$(echo '{}' | python3 "$h" 2>/tmp/err)" && { echo "FAIL: $h exited 0 on 3.9"; exit 1; }
             [ -z "$out" ] || { echo "FAIL: $h wrote to stdout on 3.9: $out"; exit 1; }
             grep -q "THE JEV-ENATOR" /tmp/err || { echo "FAIL: $h gave no branded error"; cat /tmp/err; exit 1; }
@@ -175,6 +179,11 @@ jobs:
       - name: Reads ranker (live)
         if: steps.guard.outputs.run == 'true'
         run: python3 tests/test_jev_reads.py
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      - name: Clear advisor (live)
+        if: steps.guard.outputs.run == 'true'
+        run: python3 tests/test_jev_clear.py
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       - name: Note on failure

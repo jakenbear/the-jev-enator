@@ -37,6 +37,7 @@ SUITES = (
     "test_jev_finish.py",
     "test_jev_scope.py",
     "test_jev_reads.py",
+    "test_jev_clear.py",
 )
 
 
