@@ -67,7 +67,7 @@ sys.exit(0 if any(x.get('command')=='$2' for e in h for x in e.get('hooks',[])) 
 " 2>/dev/null
 }
 
-for spec in "PreToolUse:$GATE:danger gate" "PostToolUse:$NOTICE:failure notice" "Stop:$FINISH:completion check" "PreToolUse:$SCOPE:scope check"; do
+for spec in "PreToolUse:$GATE:danger gate" "PostToolUse:$NOTICE:failure notice" "PostToolUseFailure:$NOTICE:failure notice (failed commands)" "Stop:$FINISH:completion check" "PreToolUse:$SCOPE:scope check"; do
   IFS=':' read -r event script label <<<"$spec"
   if registered "$event" "$script"; then
     ok "$label registered as a $event hook"
@@ -135,7 +135,7 @@ except Exception: print('none')
 
   # 4b. Live round trip through the PostToolUse hook. The output below exits 0
   # while reporting two failures, which is precisely the case an agent skims.
-  NOUT="$(echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test 2>&1 | tail -3"},"tool_response":{"stdout":"Time:        4.12 s\nRan all test suites.\nTests: 2 failed, 18 passed, 20 total","stderr":"","exit_code":0}}' \
+  NOUT="$(echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test 2>&1 | tail -3"},"tool_response":{"stdout":"Time:        4.12 s\nRan all test suites.\nTests: 2 failed, 18 passed, 20 total","stderr":""}}' \
     | probe_env python3 "$NOTICE" 2>&1)"
   if echo "$NOUT" | python3 -c "
 import json,sys

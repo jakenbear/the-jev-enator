@@ -45,7 +45,7 @@ fi
 # recovery instruction pointing at a file that does not exist is worse than none.
 BACKUP="$SETTINGS.bak-jevenator"
 
-chmod +x "$GATE" "$FINISH" "$NOTICE"
+chmod +x "$GATE" "$FINISH" "$NOTICE" "$SCOPE"
 cp "$SETTINGS" "$BACKUP"
 
 MODE="install"
@@ -105,6 +105,9 @@ path = pathlib.Path(os.environ["SETTINGS"])
 WIRING = [
     ("PreToolUse", os.environ["GATE"], os.environ["GATE_MATCHER"]),
     ("PostToolUse", os.environ["NOTICE"], "Bash"),
+    # A failed Bash call fires PostToolUseFailure and never PostToolUse, so
+    # without this entry the notice never sees a command that exited non-zero.
+    ("PostToolUseFailure", os.environ["NOTICE"], "Bash"),
     ("Stop", os.environ["FINISH"], None),
     # The scope check gets its own PreToolUse entry rather than sharing the
     # gate's. Its matcher is the write tools only, and Claude Code applies a

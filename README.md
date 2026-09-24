@@ -125,7 +125,7 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 15 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 16 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
@@ -149,7 +149,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 15 OKs
+./verify.sh                   # should print 16 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -157,7 +157,7 @@ Then **restart Claude Code** — `settings.json` is only read at startup.
 Get a key at [typesafe.ai](https://typesafe.ai). Pricing is $0.042 per million
 input tokens, output free.
 
-`install.sh` appends to the `PreToolUse`, `PostToolUse`, and `Stop` arrays without touching hooks
+`install.sh` appends to the `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, and `Stop` arrays without touching hooks
 you already have, backs up `settings.json` to `settings.json.bak-jevenator`, and is
 safe to run twice. It can live anywhere — paths are resolved relative to the
 script, so `~/the-jev-enator` is a suggestion, not a requirement.
@@ -183,7 +183,7 @@ To remove it:
 ./install.sh --uninstall
 ```
 
-That unregisters all three hooks and removes the key and log path it added. Your
+That unregisters all four hooks and removes the key and log path it added. Your
 original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
@@ -239,6 +239,12 @@ something.
 
 Runs after every Bash call, reads the output, and if it contains a failure, says
 so in the agent's context before the agent gets to interpret it.
+
+It is registered twice: `PostToolUse` for calls that succeeded and
+`PostToolUseFailure` for calls that exited non-zero, because Claude Code fires
+one or the other, never both. Until this was fixed it was registered for the
+first only, so every real-traffic number below comes from commands that exited 0.
+Re-run `./install.sh` to pick up the second entry.
 
 This is the hook aimed at making the agent better rather than stopping it doing
 damage. The failure it targets is specific and common:
@@ -357,8 +363,9 @@ per turn.
 ```bash
 export JEV_NOTICE_OFF=1       # failure notice off, others stay on
 export JEV_FINISH_OFF=1       # completion check off, others stay on
-export JEV_DISABLE=1          # all three off for this shell
-./install.sh --uninstall      # all three off for good
+export JEV_SCOPE_OFF=1        # scope check off, others stay on
+export JEV_DISABLE=1          # all four off for this shell
+./install.sh --uninstall      # all four off for good
 ```
 
 Or set any of them in the `env` block of `settings.json` to make it persistent.
@@ -370,15 +377,16 @@ when you don't want to spend the tokens.
 
 | Variable | Read by | What it does |
 | --- | --- | --- |
-| `TYPESAFE_API_KEY` | all three | Required. Without it every hook no-ops. |
-| `JEV_LOG` | all three | Path to the JSONL audit log. Set by `install.sh`. |
-| `JEV_DISABLE` | all three | `1` bypasses every hook in this repo. |
-| `JEV_REPLAY` | all three | Cassette path; runs offline against recorded answers. |
-| `JEV_RECORD` | all three | Appends live answers to a file, for re-recording a cassette. |
+| `TYPESAFE_API_KEY` | all four | Required. Without it every hook no-ops. |
+| `JEV_LOG` | all four | Path to the JSONL audit log. Set by `install.sh`. |
+| `JEV_DISABLE` | all four | `1` bypasses every hook in this repo. |
+| `JEV_REPLAY` | all four | Cassette path; runs offline against recorded answers. |
+| `JEV_RECORD` | all four | Appends live answers to a file, for re-recording a cassette. |
 | `JEV_GATE_EXTRA_TOOLS` | gate | Comma-separated extra tool names to gate. Keeps `GATE`: it really is gate-only. |
 | `JEV_NOTICE_OFF` | notice | `1` disables just the failure notice. |
 | `JEV_FINISH_ENFORCE` | finish | `1` lets the completion check block. Default is log-only. |
 | `JEV_FINISH_OFF` | finish | `1` disables just the completion check. |
+| `JEV_SCOPE_OFF` | scope | `1` disables just the scope check. |
 
 The first five were `JEV_GATE_*` before, which was wrong rather than merely
 stale — `JEV_GATE_DISABLE` also silenced the notice and the completion check.

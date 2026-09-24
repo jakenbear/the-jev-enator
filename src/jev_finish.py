@@ -270,17 +270,15 @@ def prompt_text(row: dict) -> str:
     return "\n".join(parts)
 
 
-def result_text(content) -> tuple[str, bool]:
-    """Flatten a tool_result body to text. Returns (text, looked_like_error)."""
+def result_text(content) -> str:
+    """Flatten a tool_result body to text."""
     if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = "\n".join(
+        return content
+    if isinstance(content, list):
+        return "\n".join(
             b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
         )
-    else:
-        text = str(content)
-    return text, False
+    return str(content)
 
 
 def build_state(rows: list[dict]) -> str | None:
@@ -309,8 +307,7 @@ def build_state(rows: list[dict]) -> str | None:
             continue
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_result":
-                text, _ = result_text(block.get("content"))
-                results[block.get("tool_use_id")] = (text, bool(block.get("is_error")))
+                results[block.get("tool_use_id")] = (result_text(block.get("content")), bool(block.get("is_error")))
 
     calls: list[str] = []
     final_text: list[str] = []

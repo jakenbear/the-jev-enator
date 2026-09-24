@@ -240,9 +240,24 @@ def build_state(payload: dict) -> str:
             new = str(edit.get("new_string", ""))[:per_edit]
             scope = " (all occurrences)" if edit.get("replace_all") else ""
             lines.append(f"Edit {i}{scope}:\n  replacing:\n{old}\n  with:\n{new}")
-    elif tool in ("Write", "Edit", "NotebookEdit"):
+    elif tool == "Edit":
+        # The replaced text, not just its replacement. Sending only new_string
+        # made an Edit that swaps 300 lines for "" read as writing nothing at all.
+        # Same split as MultiEdit's budget, so the state stays the size it was.
         lines.append(f"Target path: {tool_input.get('file_path', '')}")
-        body = tool_input.get("content") or tool_input.get("new_string") or ""
+        scope = " (all occurrences)" if tool_input.get("replace_all") else ""
+        old = str(tool_input.get("old_string", ""))[:1000]
+        new = str(tool_input.get("new_string", ""))[:1000]
+        lines.append(f"Edit{scope}:\n  replacing:\n{old}\n  with:\n{new}")
+    elif tool == "NotebookEdit":
+        # NotebookEdit names its fields differently from Write and Edit, so the
+        # old shared branch found no path and no content, and judged an empty call.
+        lines.append(f"Target path: {tool_input.get('notebook_path', '')}")
+        lines.append(f"Cell edit mode: {tool_input.get('edit_mode', 'replace')}")
+        lines.append(f"Cell source being written (truncated):\n{str(tool_input.get('new_source', ''))[:2000]}")
+    elif tool == "Write":
+        lines.append(f"Target path: {tool_input.get('file_path', '')}")
+        body = tool_input.get("content") or ""
         lines.append(f"Content being written (truncated):\n{body[:2000]}")
     else:
         # Anything from JEV_GATE_EXTRA_TOOLS lands here. There is no shape to

@@ -99,6 +99,7 @@ def case_fresh_install():
         return [
             (GATE in commands(data, "PreToolUse"), "gate wired to PreToolUse"),
             (NOTICE in commands(data, "PostToolUse"), "notice wired to PostToolUse"),
+            (NOTICE in commands(data, "PostToolUseFailure"), "notice wired to PostToolUseFailure"),
             (FINISH in commands(data, "Stop"), "finish wired to Stop"),
             (
                 any(e.get("matcher") == matcher for e in pre),
@@ -189,6 +190,7 @@ def case_uninstall_leaves_foreign_hooks():
             ("/opt/corp/notify-done.sh" in commands(data, "Stop"), "foreign Stop survived uninstall"),
             (GATE not in commands(data, "PreToolUse"), "gate removed"),
             (NOTICE not in commands(data, "PostToolUse"), "notice removed"),
+            (NOTICE not in commands(data, "PostToolUseFailure"), "notice removed from PostToolUseFailure"),
             (FINISH not in commands(data, "Stop"), "finish removed"),
             ("TYPESAFE_API_KEY" not in data.get("env", {}), "key removed from env"),
             (data.get("env", {}).get("SOME_OTHER_VAR") == "keep-me", "unrelated env var survived uninstall"),

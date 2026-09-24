@@ -218,6 +218,29 @@ CASES = [
 ]
 
 
+def real_payload(command: str, code: int, output: str) -> dict:
+    """The payload Claude Code actually sends for this outcome.
+
+    Exit 0 fires PostToolUse with a tool_response that has no exit_code field.
+    Anything else fires PostToolUseFailure with the output in an error string.
+    These fixtures used to put exit_code in tool_response, which no real call
+    has, so every fixture state differed from every production one.
+    """
+    if code == 0:
+        return {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": {"stdout": output, "stderr": "", "interrupted": False, "isImage": False},
+        }
+    return {
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "tool_error": f"Exit code {code}\n{output}",
+    }
+
+
 def main() -> int:
     require_key()
 
@@ -226,12 +249,7 @@ def main() -> int:
     for case in CASES:
         label, expected, command, code, output = case[:5]
         want_kind = case[5] if len(case) > 5 else "unchecked"
-        payload = {
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-            "tool_response": {"stdout": output, "stderr": "", "exit_code": code},
-        }
+        payload = real_payload(command, code, output)
         proc = subprocess.run(
             [sys.executable, HOOK],
             input=json.dumps(payload),
