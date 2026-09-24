@@ -310,8 +310,8 @@ def menu() -> int:
         status_line()
         print()
         for i, (_, title, blurb, _) in enumerate(MENU, 1):
-            print(f"  {bold(cyan(str(i)))}  {title:22} {dim(blurb)}")
-        print(f"  {bold(cyan('q'))}  Quit")
+            print(f"  {bold(cyan(f'{i:>2}'))}  {title:22} {dim(blurb)}")
+        print(f"  {bold(cyan(' q'))}  Quit")
         print()
         choice = ask("  > ").lower()
         if choice in ("q", "quit", "exit"):

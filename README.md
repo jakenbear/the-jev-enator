@@ -17,7 +17,7 @@
   <img alt="dependencies: none" src="https://img.shields.io/badge/dependencies-none-2ea44f">
   <img alt="latency ~350ms" src="https://img.shields.io/badge/latency-~350ms-blue">
   <img alt="cost per check" src="https://img.shields.io/badge/per%20check-%240.00004-blue">
-  <img alt="tests 71/71" src="https://img.shields.io/badge/fixtures-71%2F71-2ea44f">
+  <img alt="tests 86/86" src="https://img.shields.io/badge/fixtures-86%2F86-2ea44f">
   <img alt="CI" src="https://github.com/jakenbear/the-jev-enator/actions/workflows/test.yml/badge.svg">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-lightgrey">
 </p>
@@ -111,6 +111,12 @@ Honest status, so you can decide whether to trust it:
   plan": the last few user messages. It cannot block, so the worst case is a log
   line you disagree with. `./report.sh` prints how often its own flags were
   already explained by an earlier turn — that number is the evaluation.
+- **Reads ranker** — shadow mode, changes nothing. 6/6 scored fixtures with wide
+  margins (right chunk at p ≥ 0.99, `whole_file` at ≥ 0.96), zero real traffic.
+  `./jev reads` is the evaluation: was each suggested region the one the work needed?
+- **Clear advisor** — 9/9 fixtures (continuations ≤ 0.22 on `new_task`, new tasks
+  ≥ 0.88). Its only output is a note to you, so a wrong call costs a glance.
+  `./jev clear` lists every suggestion against its prompt.
 
 None of them has been validated across a team yet. If you're the second person to run
 this, read [Tune it on yourself first](#-tune-it-on-yourself-first).
@@ -132,9 +138,7 @@ cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
 
-Everything else is one menu away: `./jev` (status, reports, token report,
-hooks on/off, tests, install, redact). Each item runs the same script you could
-run by hand; `./jev <item>` skips the menu, e.g. `./jev tokens --since 2026-09-01`.
+Everything else is one menu away: run `./jev`. See [The `./jev` menu](#-the-jev-menu).
 
 ---
 
@@ -163,7 +167,7 @@ Then **restart Claude Code** — `settings.json` is only read at startup.
 Get a key at [typesafe.ai](https://typesafe.ai). Pricing is $0.042 per million
 input tokens, output free.
 
-`install.sh` appends to the `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, and `Stop` arrays without touching hooks
+`install.sh` appends to the `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `UserPromptSubmit` arrays without touching hooks
 you already have, backs up `settings.json` to `settings.json.bak-jevenator`, and is
 safe to run twice. It can live anywhere — paths are resolved relative to the
 script, so `~/the-jev-enator` is a suggestion, not a requirement.
@@ -194,7 +198,79 @@ original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
 
-There is nothing to run. You use Claude Code exactly as before.
+There is nothing to run. You use Claude Code exactly as before. The hooks fire
+on their own; the only one that ever talks to *you* is the clear advisor:
+
+```
+[ ⊙ ─ ] new task at 140k context (p=0.96) -- /clear would save ~140k tokens per call.
+```
+
+Type `/clear` if it's right, ignore it if not. Claude doesn't see it.
+
+### 🕹️ The `./jev` menu
+
+Everything you'd run by hand, in one place. From the repo:
+
+```bash
+./jev
+```
+
+```
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ┃  [ ⊙ ─ ]  THE JEV-ENATOR                         ┃
+  ┃  calibrated checks for Claude Code               ┃
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  hooks installed · completion check log-only
+
+   1  Status                 is every hook on and working
+   2  Audit report           what the hooks decided, and would they have been right
+   3  Token report           where your Claude Code tokens actually go
+   4  Reads ranker log       what it would have narrowed, and what that saves
+   5  Clear advisor log      which prompts it called a new task, and the context
+   6  Hooks on/off           turn single hooks on or off
+   7  Run offline tests      every suite, recorded responses, no spend
+   8  Install / reinstall    wire the hooks into Claude Code
+   9  Uninstall              remove the hooks, keep the repo
+  10  Redact log             make the audit log safe to share
+   q  Quit
+```
+
+Type a number and Enter. Each item runs the same script you could run yourself,
+so the menu can't drift from the rest of this README.
+
+Skip the menu with a name; anything after it is passed through:
+
+| Command | Runs | Try |
+| --- | --- | --- |
+| `./jev status` | `verify.sh` | after install, or when something seems off |
+| `./jev report` | `report.sh` | `./jev report --turns 20` |
+| `./jev tokens` | `tokens.sh` | `./jev tokens --since 2026-09-01 --top 20` |
+| `./jev reads` | the reads ranker's log | once you've had a few big-file reads |
+| `./jev clear` | the clear advisor's log | after a few long sessions |
+| `./jev hooks` | toggles in `settings.json` `env` | then restart Claude Code |
+| `./jev test` | every offline suite | before a commit; no key, no spend |
+| `./jev install` / `uninstall` | `install.sh` | |
+| `./jev redact` | `redact.sh` | `./jev redact -o mine.jsonl` |
+
+**Hooks on/off** writes the same `JEV_*_OFF` switches listed in
+[Turning things off](#-turning-things-off) into `settings.json`, backing it up to
+`settings.json.bak-jevenator` first. The one switch that lets a hook *block* work
+(`JEV_FINISH_ENFORCE`) asks before it turns on. Restart Claude Code after any change.
+
+### 📉 The token report
+
+```bash
+./tokens.sh                      # every transcript under ~/.claude/projects
+./tokens.sh --since 2026-09-01   # from a date
+./tokens.sh --project the-jev    # one project
+./tokens.sh --top 20             # longer "biggest items" list
+```
+
+No Jev, no network: it reads your Claude Code transcripts and reports tokens per
+call, how big your context usually is, how often it compacted, and — the number
+that matters — what each tool result **carried**: its size times the number of
+later calls that re-read it. That's what found the two newest hooks' targets:
+whole-file Reads re-read 100–200 times, and new tasks started in a 100k+ context.
 
 ### 🛡️ The danger gate
 
