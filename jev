@@ -75,14 +75,41 @@ ENFORCE = "JEV_FINISH_ENFORCE"
 DISABLE = "JEV_DISABLE"
 
 
+# The wordmark, three rows per letter, drawn in box characters so it renders in
+# any terminal font. Each letter gets one step of a cyan-to-magenta gradient.
+LETTERS = {
+    "J": (" ╺┓", "  ┃", "┗━┛"),
+    "E": ("┏━╸", "┣╸ ", "┗━╸"),
+    "V": ("╻ ╻", "┃┏┛", "┗┛ "),
+    "-": ("   ", "╺━╸", "   "),
+    "N": ("┏┓╻", "┃┗┫", "╹ ╹"),
+    "A": ("┏━┓", "┣━┫", "╹ ╹"),
+    "T": ("╺┳╸", " ┃ ", " ╹ "),
+    "O": ("┏━┓", "┃ ┃", "┗━┛"),
+    "R": ("┏━┓", "┣┳┛", "╹┗╸"),
+}
+WORD = "JEV-ENATOR"
+GRADIENT = [51, 45, 39, 33, 63, 99, 135, 171, 207, 201]
+
+
+def wordmark() -> list:
+    return [
+        " ".join(paint(LETTERS[c][row], f"1;38;5;{GRADIENT[i]}") for i, c in enumerate(WORD))
+        for row in range(3)
+    ]
+
+
 def header() -> None:
-    from jev_client import ART, BRAND
+    from jev_client import ART
 
     width = 52
     print()
     print(cyan("  " + "━" * width))
-    print(cyan("  ┃") + bold(f"  {ART}  {BRAND}".ljust(width - 2)) + cyan("┃"))
-    print(cyan("  ┃") + dim("  calibrated checks for Claude Code".ljust(width - 2)) + cyan("┃"))
+    print()
+    for line in wordmark():
+        print("   " + line)
+    print()
+    print("   " + bold(ART) + dim("  calibrated checks for Claude Code"))
     print(cyan("  " + "━" * width))
 
 

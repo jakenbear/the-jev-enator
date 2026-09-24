@@ -212,13 +212,17 @@ Type `/clear` if it's right, ignore it if not. Claude doesn't see it.
 Everything you'd run by hand, in one place. From the repo:
 
 ```bash
-./jev
+./jev          # or ./jevenator, same thing
 ```
 
 ```
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ┃  [ ⊙ ─ ]  THE JEV-ENATOR                         ┃
-  ┃  calibrated checks for Claude Code               ┃
+
+    ╺┓ ┏━╸ ╻ ╻     ┏━╸ ┏┓╻ ┏━┓ ╺┳╸ ┏━┓ ┏━┓
+     ┃ ┣╸  ┃┏┛ ╺━╸ ┣╸  ┃┗┫ ┣━┫  ┃  ┃ ┃ ┣┳┛
+   ┗━┛ ┗━╸ ┗┛      ┗━╸ ╹ ╹ ╹ ╹  ╹  ┗━┛ ╹┗╸
+
+   [ ⊙ ─ ]  calibrated checks for Claude Code
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   hooks installed · completion check log-only
 
