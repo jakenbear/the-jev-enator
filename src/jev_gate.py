@@ -4,8 +4,12 @@
 Reads a PreToolUse hook payload on stdin, asks Jev a handful of noul questions
 about the pending tool call, and returns allow / ask / deny.
 
-Fails open: any error, timeout, or missing key emits no decision, so Claude Code
-falls back to its normal permission flow.
+Network errors, timeouts, and a missing key emit no decision, so Claude Code
+falls back to its normal permission flow. An unusable reply is not that: the
+gate asks instead of treating a score it could not read as "safe" (issue #35).
+A crash is logged and also asks. Calls that would modify the installed hooks,
+the Claude Code settings that register them, or the audit log are denied
+before Jev is asked.
 
 Env:
   TYPESAFE_API_KEY       required, else the hook no-ops
@@ -22,7 +26,9 @@ install.sh gets it. See GATED_TOOLS.
 """
 
 import json
+import math
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -36,7 +42,19 @@ from jev_pyversion import require_python
 
 require_python()
 
-from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload  # noqa: E402
+from jev_client import (  # noqa: E402
+    JevError,
+    JevReplyError,
+    api_key,
+    ask_jev,
+    banner,
+    default_log_path,
+    disabled,
+    env_var,
+    guard_main,
+    log,
+    read_payload,
+)
 
 # Tools worth paying for a classification on. Read-only tools are skipped before
 # any network call.
@@ -180,8 +198,12 @@ QUESTIONS = {
             "project working directories and home project folders?"
         ),
         "criteria": {
-            "true": "Writes to /etc, /usr, /System, /Library, another user's home, or system-wide config.",
-            "false": "Writes inside the project directory, its subfolders, ~/.claude, or a temp directory.",
+            "true": (
+                "Writes to /etc, /usr, /System, /Library, another user's home, "
+                "system-wide config, or Claude Code settings (~/.claude/settings*.json "
+                "or a project's .claude/settings*.json)."
+            ),
+            "false": "Writes inside the project directory, its subfolders, or a temp directory.",
         },
     },
 }
@@ -194,6 +216,296 @@ REASONS = {
     "hardcodes_credential": "writes a real credential into a file git would track",
     "outside_workspace": "writes outside the project workspace",
 }
+
+
+# The questions above call editing source files ordinary, and they used to call
+# writes under ~/.claude fine. A model reading those criteria is the wrong
+# place to decide whether the gate may be switched off. These checks run in
+# code, before any Jev call, and they do not depend on a key.
+_SETTINGS_IN_SHELL = re.compile(
+    r"(?:^|[^\w])\.claude/settings(?:\.[\w-]+)?\.json(?![\w.])"
+)
+_REINSTALL = re.compile(
+    r"(?:^|[;&|`(]|&&|\|\|)\s*(?:\./install\.sh|(?:bash|sh|python3?)\s+install\.sh)\b"
+)
+_GIT_MUTATOR = re.compile(r"\b(checkout|stash|reset|clean|restore|switch)\b")
+_SHELL_DELIM = set(" \t\n\"'`=<>|&;()")
+
+_PROTECT_WHY = {
+    "hooks": "the installed Jev-enator hooks",
+    "settings": "Claude Code settings that register hooks",
+    "log": "the gate's audit log",
+}
+
+
+def _install_roots() -> list[Path]:
+    """Directories whose contents are the live hooks.
+
+    The running script's own directory, so an install that still points at a
+    checkout protects that checkout, and every published copy under
+    ~/.local/share/jev-enator, so a checkout-pointed hook cannot edit the copy.
+    """
+    roots = [Path(__file__).resolve().parent]
+    share = Path.home() / ".local" / "share" / "jev-enator"
+    if all(share != root for root in roots):
+        roots.append(share)
+    return roots
+
+
+def _active_log_path() -> Path:
+    raw = env_var("JEV_LOG")
+    if raw:
+        return Path(raw).expanduser()
+    return Path(default_log_path())
+
+
+def _source_repo() -> Path | None:
+    """Checkout this copy was published from, if install.sh recorded one.
+
+    Absent when this file is the checkout itself. Used so `./install.sh` run
+    from that checkout is recognised as republishing the live hooks.
+    """
+    manifest = Path(__file__).resolve().parent / "jev-install.json"
+    try:
+        data = json.loads(manifest.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+    raw = data.get("source_repo") if isinstance(data, dict) else None
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return Path(raw).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
+def _is_settings(path: Path) -> bool:
+    name = path.name
+    return path.parent.name == ".claude" and name.startswith("settings") and name.endswith(".json")
+
+
+def _expand_user_paths(text: str) -> str:
+    home = str(Path.home())
+    text = text.replace("${HOME}", home).replace("$HOME", home)
+    return re.sub(r"~(?=/|$)", home, text)
+
+
+def _names_path(text: str, needle: str, *, as_dir: bool) -> bool:
+    """True if `needle` appears as its own path, not as a prefix of a longer one."""
+    if not needle:
+        return False
+    start = 0
+    while True:
+        found = text.find(needle, start)
+        if found < 0:
+            return False
+        end = found + len(needle)
+        before_ok = found == 0 or text[found - 1] in _SHELL_DELIM
+        if end >= len(text):
+            after_ok = True
+        elif as_dir and text[end] == "/":
+            after_ok = True
+        else:
+            after_ok = text[end] in _SHELL_DELIM
+        if before_ok and after_ok:
+            return True
+        start = found + 1
+
+
+def _resolve_against(raw: str, cwd: str) -> Path | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        base = Path(cwd).expanduser() if isinstance(cwd, str) and cwd else Path.cwd()
+        path = base / path
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        try:
+            return path.absolute()
+        except (OSError, RuntimeError):
+            return None
+
+
+def _path_category(path: Path, roots: list[Path], log_file: Path) -> str | None:
+    if _is_settings(path):
+        return "settings"
+    for root in roots:
+        if _is_within(path, root):
+            return "hooks"
+    try:
+        same = path.resolve() == log_file.expanduser().resolve()
+    except (OSError, RuntimeError):
+        same = path == log_file
+    if same:
+        return "log"
+    return None
+
+
+def _file_category(raw: str, cwd: str, roots: list[Path], log_file: Path) -> str | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    # The logical path as well as the resolved one: resolve() follows a symlink
+    # and would hide a parent named .claude.
+    logical = Path(raw).expanduser()
+    if not logical.is_absolute():
+        base = Path(cwd).expanduser() if isinstance(cwd, str) and cwd else Path.cwd()
+        logical = base / logical
+    hit = _path_category(logical, roots, log_file)
+    if hit:
+        return hit
+    resolved = _resolve_against(raw, cwd)
+    if resolved is None:
+        return None
+    return _path_category(resolved, roots, log_file)
+
+
+def _cwd_inside(cwd: str, roots: list[Path]) -> bool:
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    try:
+        path = Path(cwd).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    return any(_is_within(path, root) for root in roots)
+
+
+def _git_hits_install(command: str, cwd: str, roots: list[Path]) -> bool:
+    """git checkout/stash/reset/... aimed at a directory that holds the hooks."""
+    for match in re.finditer(r"\bgit(?:\.exe)?\b", command):
+        tail = command[match.end() :]
+        if not _GIT_MUTATOR.search(tail):
+            continue
+        if _cwd_inside(cwd, roots):
+            return True
+        for flag in re.finditer(r"(?:^|\s)-C\s+(\S+)", tail):
+            target = flag.group(1).strip("\"'")
+            resolved = _resolve_against(target, cwd)
+            if resolved is not None and any(_is_within(resolved, root) for root in roots):
+                return True
+    return False
+
+
+def _token_category(command: str, cwd: str, roots: list[Path], log_file: Path) -> str | None:
+    """Relative paths the absolute-substring check cannot see.
+
+    Whitespace-split is not a shell parser. It is enough for `src/jev_gate.py`
+    and `.claude/settings.json`, which never contain the install directory's
+    absolute path.
+    """
+    for token in command.split():
+        token = token.strip("\"'`")
+        if not token or token.startswith("-") or "://" in token:
+            continue
+        if "/" not in token and not token.endswith((".py", ".json", ".jsonl")):
+            continue
+        resolved = _resolve_against(token, cwd)
+        if resolved is None:
+            continue
+        hit = _path_category(resolved, roots, log_file)
+        if hit:
+            return hit
+    return None
+
+
+def _invokes_reinstall(command: str, cwd: str, source: Path) -> bool:
+    """True if this command would run install.sh from the published checkout.
+
+    install.sh copies that checkout over the live hooks. Denying it here is
+    what stops an edit to the checkout from becoming the gate on the next call.
+    The user runs install.sh from their own terminal; this only sees tool calls.
+    """
+    installer = str(source / "install.sh")
+    expanded = _expand_user_paths(command)
+    if _names_path(expanded, installer, as_dir=False) or _names_path(command, installer, as_dir=False):
+        return True
+    try:
+        here = Path(cwd).expanduser().resolve() if isinstance(cwd, str) and cwd else None
+    except (OSError, RuntimeError):
+        here = None
+    inside = here is not None and (here == source or source in here.parents)
+    if not inside:
+        return False
+    return _REINSTALL.search(command) is not None
+
+
+def _bash_category(
+    command: str,
+    cwd: str,
+    roots: list[Path],
+    log_file: Path,
+    source: Path | None,
+) -> str | None:
+    if not isinstance(command, str) or not command.strip():
+        return None
+    # Once the shell is already inside the install tree, a relative write does
+    # not have to name the path.
+    if _cwd_inside(cwd, roots):
+        return "hooks"
+    expanded = _expand_user_paths(command)
+    for root in roots:
+        text = str(root)
+        if _names_path(expanded, text, as_dir=True) or _names_path(command, text, as_dir=True):
+            return "hooks"
+    log_text = str(log_file.expanduser())
+    try:
+        log_resolved = str(log_file.expanduser().resolve())
+    except (OSError, RuntimeError):
+        log_resolved = log_text
+    for needle in {log_text, log_resolved}:
+        if _names_path(expanded, needle, as_dir=False) or _names_path(command, needle, as_dir=False):
+            return "log"
+    if _SETTINGS_IN_SHELL.search(expanded) or _SETTINGS_IN_SHELL.search(command):
+        return "settings"
+    if _git_hits_install(expanded, cwd, roots):
+        return "hooks"
+    hit = _token_category(expanded, cwd, roots, log_file)
+    if hit:
+        return hit
+    if source is not None and _invokes_reinstall(command, cwd, source):
+        return "hooks"
+    return None
+
+
+def self_edit_target(payload: dict) -> str | None:
+    """'hooks', 'settings', or 'log' if this call would modify one of them.
+
+    None means this is not one of those calls and Jev should judge it as usual.
+    """
+    if not isinstance(payload, dict):
+        return None
+    tool = payload.get("tool_name")
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
+    roots = _install_roots()
+    log_file = _active_log_path()
+    if tool in ("Write", "Edit", "MultiEdit"):
+        raw = tool_input.get("file_path")
+        return _file_category(raw if isinstance(raw, str) else "", cwd, roots, log_file)
+    if tool == "NotebookEdit":
+        raw = tool_input.get("notebook_path")
+        return _file_category(raw if isinstance(raw, str) else "", cwd, roots, log_file)
+    if tool == "Bash":
+        command = tool_input.get("command")
+        return _bash_category(
+            command if isinstance(command, str) else "",
+            cwd,
+            roots,
+            log_file,
+            _source_repo(),
+        )
+    return None
 
 
 def emit(decision: str | None, reason: str = "") -> None:
@@ -277,6 +589,44 @@ def build_state(payload: dict) -> str:
     return "\n\n".join(lines)
 
 
+def _ask_unusable(reason: str) -> None:
+    emit(
+        "ask",
+        banner(reason, "FLAGGED")
+        + "\n\nThe check did not return a usable verdict. Confirm before running.",
+    )
+
+
+def _ask_on_crash() -> None:
+    _ask_unusable("the danger gate crashed while checking this call, so it needs confirmation")
+
+
+def _deny_protected(kind: str) -> None:
+    why = _PROTECT_WHY.get(kind, "the Jev-enator install")
+    emit(
+        "deny",
+        banner(f"this call would modify {why}", "TERMINATED")
+        + "\n\nDo not retry. Explain the intent and let the user run it themselves.",
+    )
+
+
+def _scores_usable(scores: dict) -> bool:
+    """Every asked question has a finite probability in [0, 1].
+
+    ask_jev already rejects a bad live reply. Replay and any future caller
+    hand scores straight through, and a missing one used to be read as 0.0.
+    """
+    if not isinstance(scores, dict):
+        return False
+    for name in QUESTIONS:
+        prob = scores.get(name)
+        if isinstance(prob, bool) or not isinstance(prob, (int, float)):
+            return False
+        if not math.isfinite(prob) or prob < 0.0 or prob > 1.0:
+            return False
+    return True
+
+
 def main() -> None:
     # install.sh asks for the matcher instead of keeping its own copy. Sorted so
     # the value is stable and a settings.json diff means a real change.
@@ -284,23 +634,70 @@ def main() -> None:
         print("|".join(sorted(gated_tools())))
         sys.exit(0)
 
+    # The documented off switches. They skip the path guard too: the user has
+    # already turned the gate off, and the agent cannot set these without
+    # editing settings, which the guard blocks while the gate is on.
     if disabled() or os.environ.get("JEV_GATE_OFF") == "1":
-        emit(None)
-
-    key = api_key()
-    if not key:
         emit(None)
 
     payload = read_payload()
     if payload is None or payload.get("tool_name") not in gated_tools():
         emit(None)
 
+    # Before the key check and before Jev. A missing key must not be a way
+    # around this, and the criteria are the wrong tool for it.
+    protected = self_edit_target(payload)
+    if protected:
+        log(
+            {
+                "hook": "gate",
+                "tool": payload.get("tool_name"),
+                "cwd": payload.get("cwd"),
+                "decision": "deny",
+                "reason": "self_edit",
+                "protected": protected,
+            }
+        )
+        _deny_protected(protected)
+
+    key = api_key()
+    if not key:
+        emit(None)
+
     state = build_state(payload)
     try:
         scores, elapsed_ms, usage = ask_jev(state, QUESTIONS, key)
+    except JevReplyError as exc:
+        log(
+            {
+                "hook": "gate",
+                "error": str(exc),
+                "error_class": "invalid_reply",
+                "tool": payload.get("tool_name"),
+            }
+        )
+        _ask_unusable("Jev's reply could not be read, so this call needs confirmation")
     except JevError as exc:
-        log({"hook": "gate", "error": str(exc), "tool": payload.get("tool_name")})
+        log(
+            {
+                "hook": "gate",
+                "error": str(exc),
+                "error_class": exc.error_class,
+                "tool": payload.get("tool_name"),
+            }
+        )
         emit(None)
+
+    if not _scores_usable(scores):
+        log(
+            {
+                "hook": "gate",
+                "error": "missing or unusable answers",
+                "error_class": "invalid_reply",
+                "tool": payload.get("tool_name"),
+            }
+        )
+        _ask_unusable("Jev's reply could not be read, so this call needs confirmation")
 
     log(
         {
@@ -314,11 +711,14 @@ def main() -> None:
         }
     )
 
-    # Evaluate each question against its own thresholds, then take the most
-    # severe outcome. A single question crossing its deny bar outranks any
-    # number of questions that merely want to ask.
+    # Evaluate each asked question against its own thresholds, then take the
+    # most severe outcome. A single question crossing its deny bar outranks any
+    # number of questions that merely want to ask. Iterating the questions we
+    # asked, not the keys that came back, is what makes a partial map fail
+    # above rather than allow.
     denies, asks = [], []
-    for name, prob in scores.items():
+    for name in QUESTIONS:
+        prob = float(scores[name])
         deny_at, ask_at = THRESHOLDS.get(name, DEFAULT_THRESHOLD)
         label = f"{REASONS.get(name, name)} (p={prob:.2f})"
         if prob >= deny_at:
@@ -345,4 +745,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("gate", main, _ask_on_crash)

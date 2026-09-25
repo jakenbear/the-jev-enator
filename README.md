@@ -133,7 +133,7 @@ probabilities, which usually makes the fix obvious.
 ```bash
 git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator && cp .env.example .env   # paste your TYPESAFE_API_KEY
-./install.sh && ./verify.sh                   # 22 OKs, then restart Claude Code
+./install.sh && ./verify.sh                   # 23 OKs, then restart Claude Code
 ```
 
 Then go back to work. Nothing to run, nothing to remember. 🤖
@@ -159,7 +159,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 22 OKs
+./verify.sh                   # should print 23 OKs
 ```
 
 Then **restart Claude Code** — `settings.json` is only read at startup.
@@ -177,6 +177,28 @@ It refuses rather than guesses in two cases: a `python3` older than 3.10, and a
 Claude Code can't parse is a file it's already ignoring, and appending to it would
 destroy whatever is in there.
 
+The hooks Claude Code runs are a copy under `~/.local/share/jev-enator/<fingerprint>/`,
+mode `0555`. An ordinary edit to `src/` in this checkout does not change that copy. Re-run `./install.sh` after you pull or change a hook; until
+you do, the previous copy stays in place. `./install.sh --uninstall` removes the
+copy as well as the settings entries.
+
+That split is what makes it safe to work on this repo in Claude Code. The live
+gate is the copy, so editing the checkout is normal development. The gate still
+refuses, in code and before it calls Jev, any Write, Edit, MultiEdit, NotebookEdit,
+or Bash command that would modify the installed copy, a Claude Code `settings*.json`
+under a `.claude` directory, or the audit log. Bash whose working directory is
+already inside the install tree is refused outright, because a relative path there
+can rewrite a hook. `JEV_DISABLE=1` and `JEV_GATE_OFF=1` still skip the gate,
+including this check. Those are the off switches, and while the gate is on the
+agent cannot set them without editing settings, which the check blocks.
+
+The trade-off: a change to the checkout is not live until you reinstall. If you
+skip that and leave Claude Code pointed at `src/` in the checkout, the gate treats
+that `src/` as the install and refuses edits to it, which blocks normal work on
+this repo. Install the copy. Re-running `./install.sh` publishes the checkout over
+the live hooks, so the gate denies that command when it is launched from this
+checkout. Run it yourself, in a terminal.
+
 `tests/test_install.py` covers this against settings files the author's machine
 never had — a coworker's hooks in the same events, a corrupt file, an entry
 listing our command alongside someone else's. No key or network needed.
@@ -193,7 +215,8 @@ To remove it:
 ./install.sh --uninstall
 ```
 
-That unregisters every hook and removes the key and log path it added. Your
+That unregisters every hook, removes the published copy under
+`~/.local/share/jev-enator/`, and removes the key and log path it added. Your
 original `settings.json` is at `~/.claude/settings.json.bak-jevenator`.
 
 ## 🎮 2. Using it
@@ -1018,6 +1041,23 @@ unchecked, every safe fixture would report PASS while testing nothing at all.
 
 ## 🔧 Troubleshooting
 
+**The gate refuses an edit to its own hooks, to `.claude/settings*.json`, or to the audit log.**
+That refusal is deliberate and happens before Jev is asked. It is a deny, so it
+still holds when permission prompts are off. Change those files from a terminal
+you run yourself, then re-run `./install.sh` if you changed the hooks.
+
+**A gated call ends with "the reply could not be read".** Jev answered, but the
+body was missing an asked score, or a score was not a finite number between 0 and
+1. The danger gate asks you to confirm rather than treating that as safe. The log
+line has `"error_class": "invalid_reply"`. Timeouts and a down network are still
+logged and the call falls through to Claude Code's normal permission flow.
+
+**A gated call sits for about 12 seconds and then proceeds.** The Jev request has
+a 12 second deadline. `install.sh` sets each hook's `timeout` to 20 seconds so
+Claude Code does not wait out its 600 second default, after which a PreToolUse
+hook does not block. If a call hangs much longer than that, the settings were
+written by an older install. Re-run `./install.sh`.
+
 **Everything is allowed, nothing is ever caught.** A hook is failing open. Check
 the audit log: `tail -3 ~/jev-enator.jsonl`. The most likely cause on macOS is
 `CERTIFICATE_VERIFY_FAILED` — python.org builds ship without a CA bundle wired
@@ -1066,6 +1106,7 @@ tests/test_jev_reads.py  chunker and verdict offline, then 6 scored Reads
 tests/test_tokens.py     token accounting against a hand-built transcript
 tests/test_jev_clear.py  offline rules, then 9 prompts: 6 continuations, 3 new tasks
 tests/test_install.py    install.sh against settings files it has never seen
+tests/test_jev_security.py  self-edit guard, unusable replies, request deadline
 tests/spike_posttooluse.py  the spike that proved the notice hook before building it
 tests/spike_grep_rank.py    the spike for #10: ranking grep hits. Measured, not built
 install.sh               wire into / out of settings.json
@@ -1093,6 +1134,8 @@ Standard library only, no dependencies.
 `QUESTIONS` and thresholds, build a state string from the hook payload, call
 `ask_jev`, emit the event's decision JSON, and add it to `WIRING` in
 `install.sh`. Follow the fail-open contract — on `JevError`, log and allow.
+An unusable reply (`JevReplyError`, issue #35) is the exception on the danger
+gate: it asks, rather than logging a score it could not read as a real verdict.
 
 **The rule these hooks taught:** use Jev where the answer is contained in the
 state you hand it.

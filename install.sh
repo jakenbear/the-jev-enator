@@ -102,12 +102,81 @@ if [[ -z "$LOG" ]]; then
   exit 1
 fi
 
+# Publish a separate copy and point Claude Code at that, not at this checkout.
+# An ordinary edit to src/ must not change the gate that is actually running.
+# The leaf directory is a fingerprint of the sources, so a later install lands
+# in a new directory instead of rewriting the one already in use. Mode 0555
+# stops a text editor saving over the copy. It does not stop the owner from
+# chmod, which is why the gate also denies tool calls that name this tree.
+INSTALL_ROOT="$(PYTHONPATH="$REPO/src" python3 -c 'import jev_client; print(jev_client.hook_install_root())')"
+INSTALL_DIR="$(PYTHONPATH="$REPO/src" python3 -c 'import jev_client; print(jev_client.hook_install_dir())')"
+HOOK_TIMEOUT="$(PYTHONPATH="$REPO/src" python3 -c 'import jev_client; print(jev_client.HOOK_TIMEOUT_S)')"
+if [[ -z "$INSTALL_DIR" || -z "$HOOK_TIMEOUT" || -z "$INSTALL_ROOT" ]]; then
+  echo "Could not determine where to install the hooks." >&2
+  exit 1
+fi
+
+if [[ "$MODE" == "install" ]]; then
+  parent="$(dirname "$INSTALL_DIR")"
+  mkdir -p "$parent"
+  if [[ -d "$INSTALL_DIR" ]]; then
+    chmod -R u+w "$INSTALL_DIR" || true
+    rm -rf "$INSTALL_DIR"
+  fi
+  mkdir -p "$INSTALL_DIR"
+  cp "$REPO"/src/*.py "$INSTALL_DIR/"
+  python3 - "$INSTALL_DIR/jev-install.json" "$REPO" <<'PY'
+import json, pathlib, sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({"source_repo": sys.argv[2]}) + "\n")
+PY
+  chmod 555 "$INSTALL_DIR"/*.py
+  chmod 444 "$INSTALL_DIR/jev-install.json"
+  chmod 555 "$INSTALL_DIR"
+fi
+
+GATE="$INSTALL_DIR/jev_gate.py"
+FINISH="$INSTALL_DIR/jev_finish.py"
+NOTICE="$INSTALL_DIR/jev_notice.py"
+SCOPE="$INSTALL_DIR/jev_scope.py"
+READS="$INSTALL_DIR/jev_reads.py"
+CLEAR="$INSTALL_DIR/jev_clear.py"
+
 MODE="$MODE" GATE="$GATE" FINISH="$FINISH" NOTICE="$NOTICE" SCOPE="$SCOPE" READS="$READS" CLEAR="$CLEAR" KEY="$KEY" SETTINGS="$SETTINGS" \
-GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" READS_MATCHER="$READS_MATCHER" LOG="$LOG" python3 - <<'PY'
+GATE_MATCHER="$GATE_MATCHER" SCOPE_MATCHER="$SCOPE_MATCHER" READS_MATCHER="$READS_MATCHER" LOG="$LOG" \
+INSTALL_ROOT="$INSTALL_ROOT" REPO="$REPO" HOOK_TIMEOUT="$HOOK_TIMEOUT" python3 - <<'PY'
 import json, os, pathlib
 
 mode = os.environ["MODE"]
 path = pathlib.Path(os.environ["SETTINGS"])
+repo_src = pathlib.Path(os.environ["REPO"]) / "src"
+install_root = pathlib.Path(os.environ["INSTALL_ROOT"])
+timeout = int(os.environ["HOOK_TIMEOUT"])
+
+
+def is_ours(command, script_name):
+    """A hook command this repo installed, whether it still points at the checkout.
+
+    Reinstall used to match the command string exactly, so changing the path
+    from the checkout to the published copy would add a second gate and leave
+    the old one in place. Uninstall has the same problem in reverse.
+    """
+    if not command:
+        return False
+    candidate = pathlib.Path(command)
+    if candidate.name != script_name:
+        return False
+    repo_copy = repo_src / script_name
+    try:
+        if candidate.resolve() == repo_copy.resolve():
+            return True
+    except (OSError, RuntimeError):
+        if candidate == repo_copy:
+            return True
+    try:
+        candidate.resolve().relative_to(install_root.resolve())
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
 
 # (hook event, script, matcher or None)
 WIRING = [
@@ -134,9 +203,10 @@ changed = []
 
 for event, script, matcher in WIRING:
     entries = hooks.setdefault(event, [])
+    script_name = pathlib.Path(script).name
 
-    def owns(entry, script=script):
-        return any(h.get("command") == script for h in entry.get("hooks", []))
+    def owns(entry, script_name=script_name):
+        return any(is_ours(h.get("command"), script_name) for h in entry.get("hooks", []))
 
     name = pathlib.Path(script).stem
     if mode == "uninstall":
@@ -152,7 +222,7 @@ for event, script, matcher in WIRING:
                 kept.append(entry)
                 continue
             removed = True
-            others = [h for h in entry.get("hooks", []) if h.get("command") != script]
+            others = [h for h in entry.get("hooks", []) if not is_ours(h.get("command"), script_name)]
             # Keep the entry only if something else still lives in it; an entry
             # with an empty hooks list is noise Claude Code would iterate over.
             if others:
@@ -164,18 +234,35 @@ for event, script, matcher in WIRING:
     else:
         mine = [e for e in entries if owns(e)]
         if not mine:
-            entry = {"hooks": [{"type": "command", "command": script}]}
+            entry = {"hooks": [{"type": "command", "command": script, "timeout": timeout}]}
             if matcher:
                 entry["matcher"] = matcher
             entries.append(entry)
             changed.append(f"added {name} to {event}")
-        elif matcher:
-            # Already installed, but the matcher may have widened since -- a new
-            # gated tool ships as a code change, and without this a reinstall
-            # would silently leave the old, narrower list in place. That is how
-            # MultiEdit would have stayed ungated for everyone already running it.
+        else:
             for entry in mine:
-                if entry.get("matcher") != matcher:
+                for hook in entry.get("hooks", []):
+                    if not is_ours(hook.get("command"), script_name):
+                        continue
+                    # Move a checkout path onto the published copy, and set the
+                    # hook timeout. Claude Code's default is 600s, and a
+                    # PreToolUse hook that hits it does not block the call.
+                    if hook.get("command") != script:
+                        hook["command"] = script
+                        changed.append(f"moved {name} on {event} to the installed copy")
+                    if hook.get("timeout") != timeout:
+                        hook["timeout"] = timeout
+                        changed.append(f"set {name} timeout on {event} to {timeout}s")
+                only_ours = entry.get("hooks") and all(
+                    is_ours(h.get("command"), script_name) for h in entry.get("hooks", [])
+                )
+                # Already installed, but the matcher may have widened since -- a new
+                # gated tool ships as a code change, and without this a reinstall
+                # would silently leave the old, narrower list in place. That is how
+                # MultiEdit would have stayed ungated for everyone already running it.
+                # A shared entry also holds someone else's hook, so its matcher is
+                # theirs as well and we leave it alone.
+                if only_ours and matcher and entry.get("matcher") != matcher:
                     entry["matcher"] = matcher
                     changed.append(f"updated {name} matcher on {event} -> {matcher}")
 
@@ -197,8 +284,33 @@ path.write_text(json.dumps(data, indent=2) + "\n")
 print("\n".join(f"  {c}" for c in changed) if changed else "  no change needed")
 PY
 
+# Older fingerprints go only after settings point at the new copy. Until that
+# write succeeds, set -e never reaches here, so a failed install leaves the
+# previous copy in place for the previous settings.
+if [[ "$MODE" == "install" ]]; then
+  parent="$(dirname "$INSTALL_DIR")"
+  shopt -s nullglob
+  for old in "$parent"/*; do
+    if [[ "$old" != "$INSTALL_DIR" ]]; then
+      chmod -R u+w "$old" || true
+      rm -rf "$old"
+    fi
+  done
+  shopt -u nullglob
+fi
+
+if [[ "$MODE" == "uninstall" ]]; then
+  if [[ -d "$INSTALL_ROOT" ]]; then
+    chmod -R u+w "$INSTALL_ROOT" || true
+    rm -rf "$INSTALL_ROOT"
+  fi
+fi
+
 echo
 echo "Backup: $BACKUP"
+if [[ "$MODE" == "install" ]]; then
+  echo "Hooks:  $INSTALL_DIR"
+fi
 echo "Restart Claude Code to apply."
 if [[ "$MODE" == "install" ]]; then
   echo

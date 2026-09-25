@@ -6,13 +6,17 @@ handling, timeouts, logging, and the fail-open contract live in one place.
 """
 
 import hashlib
+import http.client
 import json
+import math
 import os
 import ssl
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 API_URL = "https://api.typesafe.ai/v1/systemone"
 MODEL = "jev-latest"
@@ -20,7 +24,16 @@ MODEL = "jev-latest"
 # Typical latency is ~350ms, but cold starts have been observed above 6s.
 # Generous enough to avoid failing open on a slow call, short enough that a
 # genuinely hung API doesn't stall the session.
+#
+# This is a total deadline, not a per-read socket timeout. urllib's timeout
+# resets on every recv, so a server that trickles bytes never trips it, and
+# DNS is not covered at all. A PreToolUse hook that instead hits Claude Code's
+# own timeout does not block the tool call, and that default is 600s.
+# install.sh writes HOOK_TIMEOUT_S onto each hook, above this deadline by
+# enough to cover interpreter startup. A circuit breaker for repeated
+# timeouts is issue #38 and is deliberately not implemented here.
 TIMEOUT_S = 12.0
+HOOK_TIMEOUT_S = 20
 
 # python.org builds ship without a usable CA bundle, so urllib fails TLS
 # verification with CERTIFICATE_VERIFY_FAILED. Resolve a real bundle rather than
@@ -74,7 +87,22 @@ def tag(hook: str, elapsed_ms: int) -> str:
 
 
 class JevError(Exception):
-    """Any failure that should cause the calling hook to fail open."""
+    """A failure the calling hook can recover from without crashing.
+
+    Network errors, timeouts, and HTTP errors use this class. The danger gate
+    fails open on those: it logs and emits no decision. A reply that arrived
+    but is not a verdict for every asked question is a JevReplyError. The gate
+    turns that into ask, because a score we could not read is not "safe"
+    (issue #35).
+    """
+
+    error_class = "error"
+
+
+class JevReplyError(JevError):
+    """The server replied, but not with a usable score for every question."""
+
+    error_class = "invalid_reply"
 
 
 # --- Environment ----------------------------------------------------------
@@ -151,6 +179,41 @@ def default_log_path() -> str:
     return os.path.join(home, LOG_NAME)
 
 
+def source_fingerprint(source_dir: Path | None = None) -> str:
+    """Content hash of the hook sources.
+
+    install.sh names the published copy with this, so two different versions
+    never share a directory and an edit to the checkout does not overwrite
+    the copy Claude Code is running.
+    """
+    directory = source_dir or Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    files = sorted(path for path in directory.glob("*.py") if path.is_file())
+    if not files:
+        raise SystemExit(f"jev install: no hook sources in {directory}")
+    for path in files:
+        digest.update(path.name.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def hook_install_root(home: str | os.PathLike | None = None) -> Path:
+    """Directory that holds every published copy. Not the git checkout."""
+    base = Path(home) if home is not None else Path.home()
+    return base / ".local" / "share" / "jev-enator"
+
+
+def hook_install_dir(home: str | os.PathLike | None = None, source_dir: Path | None = None) -> Path:
+    """Where install.sh puts the hooks Claude Code actually runs.
+
+    A separate tree from the checkout: editing src/ in the repo must not
+    change the live gate. The leaf is a fingerprint of the sources.
+    """
+    return hook_install_root(home) / source_fingerprint(source_dir)
+
+
 def disabled() -> bool:
     return env_var("JEV_DISABLE") == "1"
 
@@ -216,31 +279,68 @@ def _load_cassette(path: str) -> dict:
         raise SystemExit(f"jev replay: cannot read {path}: {exc}")
 
 
-def parse_answers(answers: dict) -> dict:
-    """Flatten an API answers block to name -> score.
+def _reject_nonfinite(constant: str):
+    """json.loads accepts NaN and Infinity unless this rejects them.
 
-    A `noul` answer is a single probability, so its score is a float. A `choice`
-    answer is a distribution over labels, so its score is a dict of
-    label -> probability. Callers that only ask noul questions see no difference.
-
-    Keeping the full distribution rather than just the winning label is the whole
-    reason to use choice: the margin between first and second place is the signal
-    that three independent binaries threw away.
+    A NaN score compares false against every threshold, so it would be logged
+    as a real verdict and the call allowed. It is not a probability.
     """
-    scores = {}
-    for name, answer in answers.items():
-        if not isinstance(answer, dict):
-            continue
-        if answer.get("type") == "choice" or "probabilities" in answer:
-            probs = answer.get("probabilities") or {}
-            # An empty distribution is not a zero-confidence answer, it is a
-            # response we cannot read. Skip it so the caller's "did I get an
-            # answer" check fails rather than silently seeing no options.
-            if probs:
-                scores[name] = {k: float(v) for k, v in probs.items()}
-        else:
-            scores[name] = answer.get("noul", 0.0)
-    return scores
+    raise ValueError(f"non-finite number: {constant}")
+
+
+def _unit_interval(value, label: str) -> float:
+    """A probability: a finite float in [0, 1]. Booleans are ints; reject them."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        got = "null" if value is None else type(value).__name__
+        raise JevReplyError(f"{label} is {got}, expected a number in [0, 1]")
+    number = float(value)
+    if not math.isfinite(number) or number < 0.0 or number > 1.0:
+        raise JevReplyError(f"{label} is not a finite probability in [0, 1]")
+    return number
+
+
+# Choice probabilities are a distribution. The API says they sum to 1. Allow
+# a little rounding and reject one that is not a distribution (issue #35).
+CHOICE_SUM_TOLERANCE = 0.02
+
+
+def parse_answers(answers, questions: dict) -> dict:
+    """Map every asked question to a validated score, or raise JevReplyError.
+
+    A noul score is a float. A choice score is label -> probability. Every
+    asked name must be present and readable. A missing noul used to become
+    0.0, which is "definitely safe" for every question in this repo, and a
+    partial map used to be logged as a real verdict (issue #35).
+    """
+    if not isinstance(answers, dict):
+        kind = "missing" if answers is None else type(answers).__name__
+        raise JevReplyError(f"answers was {kind}, expected an object")
+    missing = [name for name in questions if name not in answers]
+    if missing:
+        raise JevReplyError("missing answers: " + ", ".join(sorted(missing)))
+    return {
+        name: _score_one(name, spec if isinstance(spec, dict) else {}, answers[name])
+        for name, spec in questions.items()
+    }
+
+
+def _score_one(name: str, spec: dict, answer):
+    if not isinstance(answer, dict):
+        raise JevReplyError(f"{name}: answer was {type(answer).__name__}, expected an object")
+    if spec.get("type", "noul") == "choice":
+        probs = answer.get("probabilities")
+        if not isinstance(probs, dict) or not probs:
+            raise JevReplyError(f"{name}: choice answer has no probabilities")
+        parsed = {
+            str(label): _unit_interval(value, f"{name}.{label}") for label, value in probs.items()
+        }
+        total = sum(parsed.values())
+        if abs(total - 1.0) > CHOICE_SUM_TOLERANCE:
+            raise JevReplyError(f"{name}: choice probabilities sum to {total:.3f}, not 1")
+        return parsed
+    if "noul" not in answer or answer.get("noul") is None:
+        raise JevReplyError(f"{name}: noul answer has no noul")
+    return _unit_interval(answer.get("noul"), name)
 
 
 def top_two(dist: dict) -> tuple[str, float, float]:
@@ -297,21 +397,17 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
 
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_S, context=ssl_context()) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = exc.read().decode()[:500]
-        except OSError:
-            detail = ""
-        raise JevError(f"HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        raise JevError(str(exc)) from exc
+        raw = _read_body(req, ssl_context())
+        result = _parse_body(raw)
+        scores = parse_answers(result.get("answers"), questions)
+    except JevError:
+        raise
+    except (http.client.HTTPException, json.JSONDecodeError, ValueError, AttributeError) as exc:
+        # A crash while reading the reply used to kill the hook with no audit
+        # line. Claude Code then lets the tool call run.
+        raise JevReplyError(str(exc)) from exc
 
     elapsed_ms = round((time.monotonic() - started) * 1000)
-    scores = parse_answers(result.get("answers", {}))
-    if not scores:
-        raise JevError("no answers in response")
 
     # Recording is a side effect of a normal live call, so what gets recorded is
     # exactly what the suites just ran against -- there is no separate code path
@@ -336,6 +432,102 @@ def ask_jev(state: str, questions: dict, key: str) -> tuple[dict, int, dict]:
             pass
 
     return scores, elapsed_ms, result.get("usage", {})
+
+
+def _parse_body(raw: bytes) -> dict:
+    """Decode a response body into an object, or raise JevReplyError.
+
+    The message stays generic on purpose: the body can echo the state, and
+    the state can contain a secret. The log records that the reply was
+    unusable, not the reply.
+    """
+    if not raw or not raw.strip():
+        raise JevReplyError("empty response body")
+    try:
+        text = raw.decode()
+    except UnicodeDecodeError as exc:
+        raise JevReplyError("unreadable response") from exc
+    try:
+        result = json.loads(text, parse_constant=_reject_nonfinite)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise JevReplyError("unreadable response") from exc
+    if not isinstance(result, dict):
+        raise JevReplyError(f"response was {type(result).__name__}, expected an object")
+    return result
+
+
+def _read_body(req, context) -> bytes:
+    """Read the response body within TIMEOUT_S for the whole request.
+
+    The worker is a daemon so a slow read cannot keep the hook process alive
+    after the deadline. join() is the deadline; the socket timeout is only a
+    hint to a peer that checks it.
+    """
+    box: dict = {}
+    limit = TIMEOUT_S
+
+    def run() -> None:
+        try:
+            with urllib.request.urlopen(req, timeout=limit, context=context) as resp:
+                box["body"] = resp.read()
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = exc.read().decode(errors="replace")[:500]
+            except (OSError, http.client.HTTPException):
+                detail = ""
+            box["http"] = (exc.code, detail)
+        except Exception as exc:  # noqa: BLE001 -- converted to JevError below
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, name="jev-request", daemon=True)
+    worker.start()
+    worker.join(limit)
+    if worker.is_alive():
+        raise JevError(f"timed out after {limit:g}s")
+    if "http" in box:
+        code, detail = box["http"]
+        raise JevError(f"HTTP {code}: {detail}")
+    if "error" in box:
+        exc = box["error"]
+        # IncompleteRead and a truncated body are an unusable reply. A down
+        # network is not: that still fails open.
+        if isinstance(exc, (http.client.HTTPException, json.JSONDecodeError, ValueError, AttributeError)):
+            raise JevReplyError(str(exc)) from exc
+        raise JevError(str(exc)) from exc
+    body = box.get("body")
+    if body is None:
+        raise JevReplyError("empty response body")
+    return body
+
+
+_CLI_FLAGS = {"--matcher", "--report"}
+
+
+def guard_main(hook: str, main, fail) -> None:
+    """Run a hook and log any crash instead of dying with no decision.
+
+    Claude Code treats a hook that exits non-zero with no JSON as non-blocking,
+    so an uncaught exception is a silent allow and it leaves no audit line.
+    `fail` is that hook's failure behaviour: the danger gate asks, and the
+    others emit nothing. `--matcher` and `--report` are command-line uses;
+    a crash there should still be a non-zero exit.
+    """
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- the whole point is the last-resort catch
+        log(
+            {
+                "hook": hook,
+                "error": f"{type(exc).__name__}: {exc}",
+                "error_class": "crash",
+            }
+        )
+        if _CLI_FLAGS.intersection(sys.argv[1:]):
+            print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        fail()
 
 
 def log(record: dict) -> None:

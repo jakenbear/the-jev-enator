@@ -92,6 +92,11 @@ jobs:
         # edits a file we do not own, and the only check that Linux is exercised
         # at all -- issue #4.
         run: python3 tests/test_install.py
+      - name: Security regressions
+        # No key and no network. Malformed replies, the request deadline, and
+        # the self-edit guard. Replay is opt-in inside the file for the one
+        # case that must still reach Jev.
+        run: python3 tests/test_jev_security.py
       - name: Log loading and redaction
         # No key, no network, no real log -- fixtures only. The redaction cases
         # are the reason this is in CI: the failure mode is a credential in a
