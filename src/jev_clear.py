@@ -62,7 +62,7 @@ from jev_pyversion import require_python
 
 require_python()
 
-from jev_client import ART, JevError, api_key, ask_jev, disabled, env_var, log, read_payload  # noqa: E402
+from jev_client import ART, JevError, api_key, ask_jev, disabled, env_var, guard_main, log, read_payload  # noqa: E402
 from jev_finish import is_local_command_echo, load_transcript  # noqa: E402
 from jev_scope import recent_requests  # noqa: E402
 
@@ -272,7 +272,7 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(build_state(prompt, rows), QUESTIONS, key)
     except JevError as exc:
-        log({"hook": "clear", "error": str(exc)})
+        log({"hook": "clear", "error": str(exc), "error_class": exc.error_class})
         emit()
 
     verdict = decide(scores)
@@ -295,4 +295,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("clear", main, lambda: emit(None))

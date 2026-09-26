@@ -56,6 +56,7 @@ from jev_client import (  # noqa: E402
     api_key,
     ask_jev,
     disabled,
+    guard_main,
     log,
     read_payload,
     tag,
@@ -401,7 +402,7 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(state, QUESTIONS, key)
     except JevError as exc:
-        log({"hook": "notice", "event": event, "error": str(exc)})
+        log({"hook": "notice", "event": event, "error": str(exc), "error_class": exc.error_class})
         emit(None)
 
     fail = scores.get("output_shows_failure", 0.0)
@@ -452,4 +453,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("notice", main, lambda: emit(None))

@@ -13,7 +13,7 @@ git clone git@github.com:jakenbear/the-jev-enator.git ~/the-jev-enator
 cd ~/the-jev-enator
 cp .env.example .env          # paste your TYPESAFE_API_KEY
 ./install.sh
-./verify.sh                   # should print 22 OKs
+./verify.sh                   # should print 23 OKs
 ```
 
 Python 3.10+, standard library only. No build step, no dependencies, no
@@ -136,7 +136,9 @@ in the loop beats rewording it.
    why each number is what it is
 2. Build a state string from the hook payload
 3. Call `ask_jev`, and on `JevError` **log and allow** — the fail-open contract is
-   not optional
+   not optional. The exception is an unusable reply (`JevReplyError`): the danger
+   gate asks instead of allowing, because a score it could not read is not "safe"
+   (issue #35). Network errors and timeouts still log and allow.
 4. Emit the event's decision JSON
 5. Add it to `WIRING` in `install.sh`
 6. Write fixtures, including the ones that must stay quiet

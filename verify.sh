@@ -10,12 +10,17 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
-GATE="$REPO/src/jev_gate.py"
-FINISH="$REPO/src/jev_finish.py"
-NOTICE="$REPO/src/jev_notice.py"
-SCOPE="$REPO/src/jev_scope.py"
-READS="$REPO/src/jev_reads.py"
-CLEAR="$REPO/src/jev_clear.py"
+# Junk-stdin checks run the checkout, which is the code under test. Registration
+# checks the published copy: that is what Claude Code runs after install.sh.
+SRC="$REPO/src"
+INSTALL_DIR="$(PYTHONPATH="$SRC" python3 -c 'import jev_client; print(jev_client.hook_install_dir())')"
+HOOK_TIMEOUT="$(PYTHONPATH="$SRC" python3 -c 'import jev_client; print(jev_client.HOOK_TIMEOUT_S)')"
+GATE="$INSTALL_DIR/jev_gate.py"
+FINISH="$INSTALL_DIR/jev_finish.py"
+NOTICE="$INSTALL_DIR/jev_notice.py"
+SCOPE="$INSTALL_DIR/jev_scope.py"
+READS="$INSTALL_DIR/jev_reads.py"
+CLEAR="$INSTALL_DIR/jev_clear.py"
 PASS=0
 
 ok()   { printf '  \033[32mOK\033[0m    %s\n' "$1"; }
@@ -33,7 +38,7 @@ echo
 # interpreter is resolved from Claude Code's PATH at hook time -- not from this
 # shell. They can differ. On 3.9 the hook dies importing jev_client, emits
 # nothing, and Claude Code proceeds as if the call were approved.
-PYV="$(python3 "$REPO/src/jev_pyversion.py" 2>&1)"
+PYV="$(python3 "$SRC/jev_pyversion.py" 2>&1)"
 if [[ $? -eq 0 ]]; then
   ok "python3 is ${PYV#ok } at $(command -v python3)"
 else
@@ -45,7 +50,7 @@ fi
 # 0b. Each hook must survive being run with junk on stdin. This catches a syntax
 # error, a bad import, or a missing sibling module -- all of which otherwise show
 # up only as a gate that silently stopped gating.
-for spec in "$GATE:danger gate" "$NOTICE:failure notice" "$FINISH:completion check" "$SCOPE:scope check" "$READS:reads ranker" "$CLEAR:clear advisor"; do
+for spec in "$SRC/jev_gate.py:danger gate" "$SRC/jev_notice.py:failure notice" "$SRC/jev_finish.py:completion check" "$SRC/jev_scope.py:scope check" "$SRC/jev_reads.py:reads ranker" "$SRC/jev_clear.py:clear advisor"; do
   IFS=':' read -r script label <<<"$spec"
   ERR="$(echo 'not json' | python3 "$script" 2>&1 >/dev/null)"
   if [[ -z "$ERR" ]]; then
@@ -73,15 +78,58 @@ for spec in "PreToolUse:$GATE:danger gate" "PostToolUse:$NOTICE:failure notice" 
   IFS=':' read -r event script label <<<"$spec"
   if registered "$event" "$script"; then
     ok "$label registered as a $event hook"
+    if [[ ! -x "$script" ]]; then
+      bad "$label script is not executable"
+      note "re-run: $REPO/install.sh"
+    fi
   else
     bad "$label not registered in settings.json"
-    note "run: $REPO/install.sh"
-  fi
-  if [[ ! -x "$script" ]]; then
-    bad "$label script is not executable"
-    note "run: chmod +x $script"
+    checkout="$SRC/$(basename "$script")"
+    if registered "$event" "$checkout"; then
+      note "settings still point at the git checkout; re-run: $REPO/install.sh"
+    else
+      note "run: $REPO/install.sh"
+    fi
   fi
 done
+
+# Claude Code's default hook timeout is 600s. A PreToolUse hook that hits it
+# does not block the tool call, which is longer than the client's own deadline
+# by a long way. install.sh writes an explicit timeout; an old settings file
+# will not have it until the next install.
+TIMEOUT_OK="$(python3 - "$SETTINGS" "$HOOK_TIMEOUT" "$INSTALL_DIR" <<'PY'
+import json, pathlib, sys
+settings, expect, root = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+try:
+    data = json.loads(pathlib.Path(settings).read_text())
+except (OSError, json.JSONDecodeError):
+    print("unreadable")
+    raise SystemExit(0)
+bad = []
+seen = 0
+for entries in data.get("hooks", {}).values():
+    for entry in entries:
+        for hook in entry.get("hooks", []):
+            command = hook.get("command") or ""
+            if not command.startswith(root + "/"):
+                continue
+            seen += 1
+            if hook.get("timeout") != expect:
+                bad.append(pathlib.Path(command).name)
+if not seen:
+    print("missing")
+elif bad:
+    print("wrong " + ",".join(bad))
+else:
+    print("ok")
+PY
+)"
+if [[ "$TIMEOUT_OK" == "ok" ]]; then
+  ok "hook timeout is ${HOOK_TIMEOUT}s, above the Jev deadline"
+else
+  bad "hook timeout is not ${HOOK_TIMEOUT}s (${TIMEOUT_OK})"
+  note "re-run: $REPO/install.sh"
+fi
 
 # 3. Key reachable by the hook process?
 KEY="$(python3 -c "

@@ -55,7 +55,7 @@ from jev_pyversion import require_python
 
 require_python()
 
-from jev_client import JevError, api_key, ask_jev, disabled, log, read_payload  # noqa: E402
+from jev_client import JevError, api_key, ask_jev, disabled, guard_main, log, read_payload  # noqa: E402
 from jev_finish import is_real_user_prompt, load_transcript, prompt_text  # noqa: E402
 
 # Only tools that write. A Bash command can be out of scope too, but its scope is
@@ -354,7 +354,14 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(state, QUESTIONS, key)
     except JevError as exc:
-        log({"hook": "scope", "error": str(exc), "tool": payload.get("tool_name")})
+        log(
+            {
+                "hook": "scope",
+                "error": str(exc),
+                "error_class": exc.error_class,
+                "tool": payload.get("tool_name"),
+            }
+        )
         emit()
 
     continuation = scores.get("continuation_ok", 0.0)
@@ -393,4 +400,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("scope", main, emit)

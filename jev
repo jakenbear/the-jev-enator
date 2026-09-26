@@ -270,6 +270,7 @@ SUITES = [
     ("hook state vs real payloads", "test_state.py", False),
     ("token accounting", "test_tokens.py", False),
     ("installer", "test_install.py", False),
+    ("security regressions", "test_jev_security.py", False),
     ("log redaction", "test_jev_logs.py", False),
 ]
 

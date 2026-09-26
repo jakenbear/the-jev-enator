@@ -74,6 +74,23 @@ def commands(data: dict, event: str) -> list[str]:
     ]
 
 
+def live(home: Path, filename: str) -> str:
+    """Path install.sh registers for one hook: the published copy, not the checkout."""
+    sys.path.insert(0, str(REPO / "src"))
+    import jev_client
+
+    return str(jev_client.hook_install_dir(home=home) / filename)
+
+
+def hook_commands(data: dict) -> list[dict]:
+    return [
+        hook
+        for entries in data.get("hooks", {}).values()
+        for entry in entries
+        for hook in entry.get("hooks", [])
+    ]
+
+
 def make_home(initial: dict) -> Path:
     home = Path(tempfile.mkdtemp(prefix="jev-install-test-"))
     claude = home / ".claude"
@@ -98,13 +115,21 @@ def case_fresh_install():
             [sys.executable, GATE, "--matcher"], capture_output=True, text=True
         ).stdout.strip()
         pre = data["hooks"]["PreToolUse"]
+        gate = live(home, "jev_gate.py")
         return [
-            (GATE in commands(data, "PreToolUse"), "gate wired to PreToolUse"),
-            (NOTICE in commands(data, "PostToolUse"), "notice wired to PostToolUse"),
-            (NOTICE in commands(data, "PostToolUseFailure"), "notice wired to PostToolUseFailure"),
-            (FINISH in commands(data, "Stop"), "finish wired to Stop"),
-            (READS in commands(data, "PreToolUse"), "reads ranker wired to PreToolUse"),
-            (CLEAR in commands(data, "UserPromptSubmit"), "clear advisor wired to UserPromptSubmit"),
+            (gate in commands(data, "PreToolUse"), "gate wired to PreToolUse"),
+            (live(home, "jev_notice.py") in commands(data, "PostToolUse"), "notice wired to PostToolUse"),
+            (
+                live(home, "jev_notice.py") in commands(data, "PostToolUseFailure"),
+                "notice wired to PostToolUseFailure",
+            ),
+            (live(home, "jev_finish.py") in commands(data, "Stop"), "finish wired to Stop"),
+            (live(home, "jev_reads.py") in commands(data, "PreToolUse"), "reads ranker wired to PreToolUse"),
+            (
+                live(home, "jev_clear.py") in commands(data, "UserPromptSubmit"),
+                "clear advisor wired to UserPromptSubmit",
+            ),
+            (GATE not in commands(data, "PreToolUse"), "checkout path is not what Claude Code runs"),
             (
                 any(e.get("matcher") == matcher for e in pre),
                 "PreToolUse matcher matches --matcher output",
@@ -126,10 +151,11 @@ def case_idempotent():
         first = settings_of(home)
         run(home)
         second = settings_of(home)
+        gate = live(home, "jev_gate.py")
         return [
             (first == second, "second install is a no-op"),
             (
-                commands(second, "PreToolUse").count(GATE) == 1,
+                commands(second, "PreToolUse").count(gate) == 1,
                 "gate appears exactly once after two installs",
             ),
         ]
@@ -159,7 +185,16 @@ def case_preserves_foreign_hooks():
             ("/opt/corp/notify-done.sh" in commands(data, "Stop"), "foreign Stop kept"),
             (data.get("env", {}).get("SOME_OTHER_VAR") == "keep-me", "unrelated env var kept"),
             (data.get("theme") == "dark", "unrelated top-level setting kept"),
-            (GATE in commands(data, "PreToolUse"), "gate still installed alongside"),
+            (live(home, "jev_gate.py") in commands(data, "PreToolUse"), "gate still installed alongside"),
+            (
+                next(
+                    h
+                    for h in hook_commands(data)
+                    if h.get("command") == "/opt/corp/audit-hook.sh"
+                ).get("timeout")
+                is None,
+                "a foreign hook does not gain our timeout",
+            ),
         ]
     finally:
         shutil.rmtree(home, ignore_errors=True)
@@ -192,10 +227,18 @@ def case_uninstall_leaves_foreign_hooks():
             ("/opt/corp/audit-hook.sh" in commands(data, "PreToolUse"), "foreign PreToolUse survived uninstall"),
             ("/opt/corp/format-on-write.sh" in commands(data, "PostToolUse"), "foreign PostToolUse survived uninstall"),
             ("/opt/corp/notify-done.sh" in commands(data, "Stop"), "foreign Stop survived uninstall"),
-            (GATE not in commands(data, "PreToolUse"), "gate removed"),
-            (NOTICE not in commands(data, "PostToolUse"), "notice removed"),
-            (NOTICE not in commands(data, "PostToolUseFailure"), "notice removed from PostToolUseFailure"),
-            (FINISH not in commands(data, "Stop"), "finish removed"),
+            (live(home, "jev_gate.py") not in commands(data, "PreToolUse"), "gate removed"),
+            (GATE not in commands(data, "PreToolUse"), "checkout gate path removed too"),
+            (live(home, "jev_notice.py") not in commands(data, "PostToolUse"), "notice removed"),
+            (
+                live(home, "jev_notice.py") not in commands(data, "PostToolUseFailure"),
+                "notice removed from PostToolUseFailure",
+            ),
+            (live(home, "jev_finish.py") not in commands(data, "Stop"), "finish removed"),
+            (
+                not (home / ".local" / "share" / "jev-enator").exists(),
+                "the published copy is removed with the hooks",
+            ),
             ("TYPESAFE_API_KEY" not in data.get("env", {}), "key removed from env"),
             (data.get("env", {}).get("SOME_OTHER_VAR") == "keep-me", "unrelated env var survived uninstall"),
         ]
@@ -588,22 +631,24 @@ def case_scope_hook_wired_separately():
             for e in pre
             for h in e.get("hooks", [])
         }
+        scope = live(home, "jev_scope.py")
+        gate = live(home, "jev_gate.py")
         return [
-            (SCOPE in commands(data, "PreToolUse"), "scope hook wired to PreToolUse"),
+            (scope in commands(data, "PreToolUse"), "scope hook wired to PreToolUse"),
             (bool(scope_matcher), f"--matcher returns a matcher ({scope_matcher!r})"),
             (
-                entry_of.get(SCOPE) == scope_matcher,
-                f"its entry uses the matcher the hook reports (got {entry_of.get(SCOPE)!r})",
+                entry_of.get(scope) == scope_matcher,
+                f"its entry uses the matcher the hook reports (got {entry_of.get(scope)!r})",
             ),
             (
-                entry_of.get(GATE) == gate_matcher,
+                entry_of.get(gate) == gate_matcher,
                 "the gate keeps its own, wider matcher",
             ),
             (
-                entry_of.get(SCOPE) != entry_of.get(GATE),
+                entry_of.get(scope) != entry_of.get(gate),
                 "the two do not share an entry, so neither narrows the other",
             ),
-            ("Bash" not in (entry_of.get(SCOPE) or ""), "the scope check does not fire on Bash"),
+            ("Bash" not in (entry_of.get(scope) or ""), "the scope check does not fire on Bash"),
         ]
     finally:
         shutil.rmtree(home, ignore_errors=True)
@@ -653,8 +698,8 @@ def case_scope_uninstall_removes_only_itself():
         data = settings_of(home)
         pre = commands(data, "PreToolUse")
         return [
-            (SCOPE not in pre, "scope hook removed"),
-            (GATE not in pre, "gate removed"),
+            (live(home, "jev_scope.py") not in pre, "scope hook removed"),
+            (live(home, "jev_gate.py") not in pre, "gate removed"),
             ("/opt/corp/audit-hook.sh" in pre, "foreign PreToolUse hook survived both removals"),
         ]
     finally:
@@ -672,6 +717,7 @@ def case_reads_hook_wired_on_read_only():
     try:
         run(home)
         data = settings_of(home)
+        reads = live(home, "jev_reads.py")
         entry_of = {
             h.get("command"): e.get("matcher")
             for e in data["hooks"]["PreToolUse"]
@@ -680,8 +726,8 @@ def case_reads_hook_wired_on_read_only():
         run(home, "--uninstall")
         after = commands(settings_of(home), "PreToolUse")
         return [
-            (entry_of.get(READS) == "Read", f"reads entry matches Read only (got {entry_of.get(READS)!r})"),
-            (READS not in after, "uninstall removes the reads hook"),
+            (entry_of.get(reads) == "Read", f"reads entry matches Read only (got {entry_of.get(reads)!r})"),
+            (reads not in after, "uninstall removes the reads hook"),
             ("/opt/corp/audit-hook.sh" in after, "foreign PreToolUse hook survived"),
         ]
     finally:
@@ -753,8 +799,89 @@ def case_verify_uses_the_shared_legacy_helper():
     ]
 
 
+def case_published_copy_and_timeout():
+    """The live hooks are a non-writable copy, and each one has an explicit timeout.
+
+    Claude Code's default hook timeout is 600s. A PreToolUse hook that hits it
+    does not block the tool call. The copy is what stops an edit to this
+    checkout from changing the gate that is running.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    import jev_client
+
+    home = make_home({})
+    try:
+        proc = run(home)
+        if proc.returncode:
+            return [(False, f"install failed: {proc.stderr.strip()[:160]}")]
+        data = settings_of(home)
+        gate = Path(live(home, "jev_gate.py"))
+        mode = gate.stat().st_mode
+        ours = [
+            hook
+            for hook in hook_commands(data)
+            if ".local/share/jev-enator/" in (hook.get("command") or "")
+        ]
+        timeouts = [hook.get("timeout") for hook in ours]
+        try:
+            gate.open("a").close()
+            writable = True
+        except PermissionError:
+            writable = False
+        return [
+            (gate.is_file(), "gate was copied out of the checkout"),
+            (
+                gate.resolve() != (REPO / "src" / "jev_gate.py").resolve(),
+                "the live gate is not the checkout file",
+            ),
+            (gate.read_bytes() == (REPO / "src" / "jev_gate.py").read_bytes(), "the copy matches the source"),
+            (mode & 0o222 == 0, f"installed copy is not writable (mode {oct(mode)})"),
+            (mode & 0o111 != 0, "installed copy is executable"),
+            (not writable, "opening the copy for write is refused"),
+            (len(ours) == 7, f"all seven hook commands are copies (got {len(ours)})"),
+            (
+                timeouts == [jev_client.HOOK_TIMEOUT_S] * len(ours),
+                f"every hook timeout is {jev_client.HOOK_TIMEOUT_S}s (got {timeouts})",
+            ),
+            (
+                jev_client.HOOK_TIMEOUT_S >= jev_client.TIMEOUT_S + 5,
+                "the hook timeout sits comfortably above the request deadline",
+            ),
+            ((gate.parent / "jev-install.json").is_file(), "the copy records which checkout it came from"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def case_reinstall_leaves_the_checkout():
+    """An existing install that points at the checkout is moved onto the copy."""
+    home = make_home(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": GATE}]}
+                ]
+            }
+        }
+    )
+    try:
+        proc = run(home)
+        if proc.returncode:
+            return [(False, f"install failed: {proc.stderr.strip()[:160]}")]
+        pre = commands(settings_of(home), "PreToolUse")
+        gate = live(home, "jev_gate.py")
+        return [
+            (GATE not in pre, "checkout path is no longer registered"),
+            (pre.count(gate) == 1, "the published copy is registered once"),
+        ]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 CASES = [
     ("fresh install wires every hook", case_fresh_install),
+    ("published copy is not writable and has a hook timeout", case_published_copy_and_timeout),
+    ("reinstall moves hooks off the checkout", case_reinstall_leaves_the_checkout),
     ("verify.sh uses the shared legacy-env helper", case_verify_uses_the_shared_legacy_helper),
     ("installing twice changes nothing", case_idempotent),
     ("install preserves foreign hooks and settings", case_preserves_foreign_hooks),

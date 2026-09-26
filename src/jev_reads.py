@@ -57,7 +57,17 @@ from jev_pyversion import require_python
 
 require_python()
 
-from jev_client import JevError, api_key, ask_jev, disabled, env_var, log, read_payload, top_two  # noqa: E402
+from jev_client import (  # noqa: E402
+    JevError,
+    api_key,
+    ask_jev,
+    disabled,
+    env_var,
+    guard_main,
+    log,
+    read_payload,
+    top_two,
+)
 from jev_finish import load_transcript  # noqa: E402
 from jev_scope import recent_requests  # noqa: E402
 
@@ -329,7 +339,7 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(state, questions(lines, chunks), key)
     except JevError as exc:
-        log({"hook": "reads", "error": str(exc)})
+        log({"hook": "reads", "error": str(exc), "error_class": exc.error_class})
         emit()
 
     dist = scores.get("region")
@@ -356,4 +366,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("reads", main, emit)

@@ -40,7 +40,7 @@ require_python()
 
 import os  # noqa: E402
 
-from jev_client import JevError, api_key, ask_jev, banner, disabled, log, read_payload  # noqa: E402
+from jev_client import JevError, api_key, ask_jev, banner, disabled, guard_main, log, read_payload  # noqa: E402
 
 # Thresholds at which a question counts as a hit. In log-only mode a hit is just
 # recorded; under JEV_FINISH_ENFORCE=1 it blocks the stop. Higher than the
@@ -383,7 +383,7 @@ def main() -> None:
     try:
         scores, elapsed_ms, usage = ask_jev(state, QUESTIONS, key)
     except JevError as exc:
-        log({"hook": "finish", "error": str(exc)})
+        log({"hook": "finish", "error": str(exc), "error_class": exc.error_class})
         emit_allow()
 
     enforcing = os.environ.get("JEV_FINISH_ENFORCE") == "1"
@@ -441,4 +441,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    guard_main("finish", main, emit_allow)
