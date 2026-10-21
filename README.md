@@ -665,7 +665,7 @@ your own data is how you end up uninstalling it on day two.
 
 ## 👥 4. Sharing with the team
 
-Yes — that's the intended deployment. Three considerations:
+Yes — that's the intended deployment. Four considerations:
 
 **Never commit `.env`.** It's gitignored. `install.sh` copies the key into
 `~/.claude/settings.json`, which is per-user and outside the repo.
@@ -678,6 +678,41 @@ team, prefer a shared org key you can rotate over personal keys, and treat
 **Tune thresholds centrally.** The `THRESHOLDS` / `BLOCK_AT` dicts in `src/` are
 the policy. Changing them in the repo and having people pull is the whole update
 mechanism — no redeploy, no restart beyond Claude Code itself.
+
+**Check what leaves each machine.** Review [Where your data goes](#-where-your-data-goes)
+against your team's data policy before enabling the hooks.
+
+### 🔐 Where your data goes
+
+All six hooks use TypeSafe's HTTPS API at
+`https://api.typesafe.ai/v1/systemone`. On a live classification, the request
+contains the hook's questions and the following text, with per-hook truncation.
+**Log-only and shadow modes still send data**; they limit enforcement, not
+network access.
+
+| Hook | What it sends |
+| --- | --- |
+| Danger gate | Working directory, tool name, command and stated purpose, or target path and write/edit/notebook content excerpts; other gated tools send argument excerpts. |
+| Failure notice | Bash command, exit status, and output/error text (first and last 4,000 characters for long output). |
+| Completion check | Excerpts of the current turn's request, tool calls (names, arguments, results), and final assistant message. |
+| Scope check | Last three user request excerpts, paths already written this turn, and the pending write/edit path and content excerpts. |
+| Reads ranker | Last three user request excerpts, last three components of the file path, line counts and ranges, and the first ~320 characters of each chunk. |
+| Clear advisor | Excerpts of the new prompt, recent user requests and last assistant reply, plus recently touched file paths. |
+
+**At TypeSafe:** its [Models — Data handling](https://docs.typesafe.ai/models#data-handling)
+section states, “Jev is not trained on customer requests or responses.” Its
+[Legal page](https://docs.typesafe.ai/legal) offers zero data retention (ZDR) for
+enterprise customers and links to the Data Processing Agreement and Privacy
+Policy. **Do not assume ZDR on a standard key**: requests may be retained under
+TypeSafe's terms. Use those pages for the current terms, not this summary as a
+retention guarantee.
+
+**Off switches and logs:** `JEV_READS_OFF=1` disables just the reads ranker.
+Use `./jev hooks` to toggle individual hooks in `settings.json`, then restart
+Claude Code, or `JEV_DISABLE=1` to bypass every hook in its environment; see
+[Turning things off](#-turning-things-off). The audit log stays local.
+`./redact.sh` prepares a log for sharing; it **does not scrub what the hooks send
+to TypeSafe**.
 
 ### 📊 Pooling logs across the team
 
@@ -962,8 +997,9 @@ didn't see — so the log comes before any nudge. Read it with `./jev reads`: fo
 each suggestion, was that region the one the work needed?
 
 **It sends file excerpts to typesafe.ai**: the first ~320 characters of each
-chunk, plus your last three messages. The other hooks send commands and output;
-this one sends source. If that's not OK for a repo, `JEV_READS_OFF=1`.
+chunk, plus your last three messages. If that's not OK for a repo,
+`JEV_READS_OFF=1`. See [Where your data goes](#-where-your-data-goes) for all six
+hooks' payloads and TypeSafe's training and retention policies.
 
 ### 🧹 Clear advisor — `src/jev_clear.py`
 
