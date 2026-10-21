@@ -252,7 +252,7 @@ def render(s, heading=None):
 
     print()
     print("=" * 58)
-    print("  FAILURE NOTICE  (PostToolUse)")
+    print("  FAILURE NOTICE  (PostToolUse / PostToolUseFailure)")
     print("=" * 58)
     nn = s["notice"]
     if not nn["total"]:
@@ -267,12 +267,14 @@ def render(s, heading=None):
         # A nine-fold understatement of the headline, contradicted three lines
         # later by prose calling it "the number that justifies this hook".
         for label, n, denom in (
-            ("stayed quiet", total - nn["noticed"], total),
+            ("stayed quiet", total - nn["noticed"] + nn["suppressed"], total),
             ("flagged a failure", nn["noticed"], total),
             ("   of those, easy to miss", nn["emphatic"], nn["noticed"]),
         ):
             pct = f"{100*n/denom:5.1f}%" if denom else "    --"
             print(f"    {label:26} {n:5}  {pct}  {bar(n, denom)}")
+        print(f"\n  {nn['noticed'] - nn['suppressed']} notices injected; "
+              f"{nn['suppressed']} suppressed (already failed).")
 
         # Which recovery got named, and how often the classifier was too unsure
         # to name one. A large "too close to call" count means KIND_MARGIN is too

@@ -19,6 +19,7 @@ Usage:
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -27,6 +28,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
 import jev_logs  # noqa: E402
+from fixture_env import hook_env  # noqa: E402
 
 # A real-shaped gate record, with every sensitive field populated.
 GATE_ROW = {
@@ -705,6 +707,57 @@ def case_noticed_records_are_fully_accounted():
     ]
 
 
+def case_suppressed_notices_are_counted_not_reclassified():
+    """Mixed old/new logs distinguish failures found from context injected."""
+    base = {"hook": "notice", "scores": {"output_shows_failure": 0.99}, "noticed": True}
+    rows = [
+        base,  # historical: no suppression marker, no kind question
+        {**base, "event": "PostToolUseFailure", "suppressed": "already_failed",
+         "kind": "needs_code_change", "kind_margin": 1.0},
+        {**base, "event": "PostToolUseFailure", "suppressed": "already_failed",
+         "kind": None, "kind_margin": 0.07},
+        {**base, "event": "PostToolUseFailure", "kind": "transient", "kind_margin": 1.0},
+        {**base, "event": "PostToolUseFailure", "emphatic": True,
+         "kind": "needs_code_change", "kind_margin": 1.0},
+        {**base, "noticed": False, "scores": {"output_shows_failure": 0.01}},
+        {"hook": "notice", "event": "PostToolUseFailure", "error": "timeout"},
+    ]
+    n = jev_logs.summarize(rows)["notice"]
+    redacted = jev_logs.redact_all(rows)
+    results = [
+        (n["total"] == 6 and n["noticed"] == 5, "suppression does not change classification counts"),
+        (n.get("suppressed") == 2, "only explicitly suppressed notices counted"),
+        (n["emphatic"] == 1, "emphatic count unchanged"),
+        (n["kinds"] == {"needs_code_change": 2, "transient": 1}, "suppressed kinds stay in breakdown"),
+        (n["kind_unsure"] == 1 and n["kind_unasked"] == 1, "unsure and historical records stay counted"),
+        (redacted[1].get("suppressed") == "already_failed", "suppression reason survives redaction"),
+        ("suppressed" not in jev_logs.audit(rows), "suppression reason is not sensitive"),
+        (jev_logs.summarize(redacted)["notice"] == n, "shared logs retain the same notice summary"),
+        (jev_logs.summarize([base])["notice"].get("suppressed") == 0, "old logs have zero suppressed"),
+        (jev_logs.summarize([])["notice"].get("suppressed") == 0, "empty logs have zero suppressed"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="jev-notice-report-") as tmp:
+        path = write_log(rows, directory=tmp)
+        for args in ([], ["--json"]):
+            proc = subprocess.run(
+                [str(REPO / "report.sh"), str(path), *args],
+                capture_output=True, text=True, env=hook_env(str(Path(tmp) / "unused.jsonl")),
+            )
+            results.append((proc.returncode == 0, f"report {args}: exits cleanly"))
+            if args:
+                results.append((json.loads(proc.stdout)["summary"]["notice"] == n,
+                                "report --json matches the summary"))
+            else:
+                lines = [line.split() for line in proc.stdout.splitlines()]
+                results += [
+                    (["stayed", "quiet", "3"] in [line[:3] for line in lines],
+                     "text report counts suppressed calls as quiet"),
+                    ("3 notices injected; 2 suppressed (already failed)." in proc.stdout,
+                     "text report distinguishes injections from suppressions"),
+                ]
+    return results
+
+
 def case_gate_reasons_are_not_silently_truncated():
     """Every question that fired is reported, or the report says how many are hidden.
 
@@ -736,6 +789,7 @@ CASES = [
     ("the state_tail evidence field is redacted", case_state_tail_is_redacted),
     ("legacy kind labels merge with their new names", case_legacy_kind_labels_are_merged),
     ("every noticed record is accounted for", case_noticed_records_are_fully_accounted),
+    ("suppressed notices remain counted and share-safe", case_suppressed_notices_are_counted_not_reclassified),
     ("gate reasons are all retained", case_gate_reasons_are_not_silently_truncated),
     ("fixture and probe records are excluded", case_synthetic_records_are_excluded),
     ("merging tags sources and drops duplicates", case_merge_tags_and_dedupes),

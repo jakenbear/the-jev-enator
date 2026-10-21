@@ -27,6 +27,7 @@ import sys
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
@@ -103,6 +104,73 @@ def case_failure_event_is_emitted_as_itself():
     return [(out["hookEventName"] == "PostToolUseFailure", "emit answers with the event it was called for")]
 
 
+def case_notice_only_adds_context_to_failed_calls():
+    """Mock scores, not classifier recordings, to pin the emission boundaries."""
+    code_change = {"needs_code_change": 1.0}
+    tie = {"missing_dependency": 0.49, "transient": 0.42, "wrong_invocation": 0.06,
+           "needs_code_change": 0.03}
+    cases = [
+        # (label, failed event, failure score, misleading score, kind, expected)
+        ("plain failure", True, 0.99, 0.10, code_change, "suppressed"),
+        ("kind too close", True, 0.99, 0.10, tie, "suppressed"),
+        ("kind below bar", True, 0.99, 0.10, dict.fromkeys(
+            ("missing_dependency", "transient", "wrong_invocation", "needs_code_change"), 0.25
+        ), "suppressed"),
+        ("below emphatic bar", True, 0.99, jev_notice.EMPHATIC_AT - 0.01, code_change, "suppressed"),
+        ("at emphatic bar", True, 0.99, jev_notice.EMPHATIC_AT, code_change, "emphatic"),
+        ("above emphatic bar", True, 0.99, jev_notice.EMPHATIC_AT + 0.01, tie, "emphatic"),
+        ("exit 0 plain failure", False, 0.99, 0.10, code_change, "notice"),
+        ("exit 0 kind too close", False, 0.99, 0.10, tie, "notice"),
+        ("exit 0 emphatic", False, 0.99, jev_notice.EMPHATIC_AT, code_change, "emphatic"),
+        ("below failure bar", True, jev_notice.NOTICE_AT - 0.01, 0.99, code_change, "quiet"),
+        ("at failure bar", True, jev_notice.NOTICE_AT, 0.10, code_change, "suppressed"),
+    ]
+    for kind in jev_notice.HINTS:
+        cases.append((kind, True, 0.99, 0.10, {kind: 1.0}, "notice"))
+
+    results = []
+    for label, failed, fail, misleads, dist, expected in cases:
+        output = "FAIL src/auth.spec.ts\nTests: 2 failed, 18 passed, 20 total"
+        payload = failure_payload(f"Exit code 1\n{output}") if failed else success_payload(output)
+        scores = {"output_shows_failure": fail, "exit_status_misleads": misleads, "failure_kind": dist}
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_NOTICE_OFF": "0"}), patch.object(
+            jev_notice, "disabled", return_value=False
+        ), patch.object(jev_notice, "api_key", return_value="fixture"), patch.object(
+            jev_notice, "read_payload", return_value=payload
+        ), patch.object(jev_notice, "ask_jev", return_value=(scores, 12, {"input_tokens": 100})), patch.object(
+            jev_notice, "log"
+        ) as logged, redirect_stdout(buf):
+            try:
+                jev_notice.main()
+            except SystemExit as exc:
+                results.append((exc.code == 0, f"{label}: exits cleanly"))
+        out = buf.getvalue()
+        record = logged.call_args.args[0]
+        results += [
+            (logged.call_count == 1 and record["scores"] == scores, f"{label}: scores still logged"),
+            (record["noticed"] == (fail >= jev_notice.NOTICE_AT), f"{label}: noticed unchanged"),
+            (record["emphatic"] == (fail >= jev_notice.NOTICE_AT and misleads >= jev_notice.EMPHATIC_AT),
+             f"{label}: emphatic unchanged"),
+            (record["kind"] == (jev_notice.kind_verdict(scores)[0] if record["noticed"] else None),
+             f"{label}: kind still logged"),
+            ((record.get("suppressed") == "already_failed") if expected == "suppressed"
+             else "suppressed" not in record, f"{label}: suppression marker"),
+        ]
+        if expected in ("suppressed", "quiet"):
+            results.append((not out, f"{label}: injects nothing"))
+        else:
+            decision = json.loads(out)["hookSpecificOutput"]
+            ctx = decision["additionalContext"]
+            results += [
+                (decision["hookEventName"] == payload["hook_event_name"], f"{label}: correct event"),
+                (("easy to miss" in ctx) == (expected == "emphatic"), f"{label}: correct wording"),
+            ]
+            if label in jev_notice.HINTS:
+                results.append((jev_notice.HINTS[label] in ctx, f"{label}: recovery still named"))
+    return results
+
+
 def case_persisted_output_reads_the_real_tail():
     # Over ~30KB, stdout is cut at 30000 chars and the whole output goes to a
     # file. The test summary is at the end -- past the cut.
@@ -158,6 +226,7 @@ CASES = [
     ("success payload: returnCodeInterpretation", case_return_code_interpretation_is_kept),
     ("PostToolUseFailure payload", case_failure_event_output_and_exit),
     ("PostToolUseFailure output event name", case_failure_event_is_emitted_as_itself),
+    ("notice suppression and emission boundaries", case_notice_only_adds_context_to_failed_calls),
     ("persisted large output", case_persisted_output_reads_the_real_tail),
     ("gate: Edit deletion", case_gate_edit_shows_what_is_removed),
     ("gate: NotebookEdit", case_gate_notebook_edit_has_content),

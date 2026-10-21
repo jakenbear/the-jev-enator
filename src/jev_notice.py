@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Jev-backed PostToolUse notice for Claude Code.
 
-Reads the output of a Bash call and, if it contains a failure, says so in the
-agent's context before the agent gets to interpret it.
+Reads the output of a Bash call and, if it contains a failure, adds context
+before the agent gets to interpret it. Already-failed calls get a notice only
+when there is a recovery to suggest or an easy-to-miss failure to point out.
 
 This is the one hook in this repo aimed at making the agent better rather than
 stopping it doing damage. The failure mode it targets is real and common: a test
@@ -410,6 +411,11 @@ def main() -> None:
     noticed = fail >= NOTICE_AT
     kind, kind_p, kind_margin = kind_verdict(scores)
     hint = recovery_hint(kind) if noticed else None
+    # Claude Code already reports a failed exit. Repeat it only to add a
+    # recovery or point out a failure that the visible output could hide.
+    suppressed = (
+        noticed and event == "PostToolUseFailure" and not hint and misleads < EMPHATIC_AT
+    )
 
     # The full distribution goes into scores, and the derived kind/probability/
     # margin alongside it. Logging the margin is what makes KIND_MARGIN tunable
@@ -428,10 +434,11 @@ def main() -> None:
             "kind_p": round(kind_p, 3),
             "kind_margin": round(kind_margin, 3),
             "command": (payload.get("tool_input", {}) or {}).get("command", "")[:200],
+            **({"suppressed": "already_failed"} if suppressed else {}),
         }
     )
 
-    if not noticed:
+    if not noticed or suppressed:
         emit(None)
 
     if misleads >= EMPHATIC_AT:

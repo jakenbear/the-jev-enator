@@ -55,6 +55,7 @@ SAFE_FIELDS = frozenset(
         "enforcing",
         "flagged",
         "noticed",
+        "suppressed",
         "emphatic",
         "event",
         "kind",
@@ -606,6 +607,7 @@ def summarize(rows: list[dict]) -> dict:
         "notice": {
             "total": len(notice),
             "noticed": len(spoke),
+            "suppressed": len([r for r in spoke if r.get("suppressed") == "already_failed"]),
             "emphatic": len([r for r in notice if r.get("emphatic")]),
             "kinds": _counter(canonical_kind(r["kind"]) for r in spoke if r.get("kind")),
             "kind_unsure": len(unsure),

@@ -346,8 +346,8 @@ something.
 
 ### 🔔 The failure notice
 
-Runs after every Bash call, reads the output, and if it contains a failure, says
-so in the agent's context before the agent gets to interpret it.
+Runs after every Bash call, reads the output, and if it contains a failure, adds
+context when there is something the agent might miss.
 
 It is registered twice: `PostToolUse` for calls that succeeded and
 `PostToolUseFailure` for calls that exited non-zero, because Claude Code fires
@@ -375,7 +375,11 @@ lands while there's still time to act, rather than costing you a turn afterwards
 
 Two questions decide whether to speak: `output_shows_failure` at ≥0.85 to say
 anything, `exit_status_misleads` at ≥0.45 to say it emphatically. A failure stated
-plainly needs no help; one hidden behind exit 0 does.
+plainly needs no help; one hidden behind exit 0 does. On `PostToolUseFailure`,
+Claude Code already reports the failed command, so the hook speaks only when it
+has a recovery hint to add or the output clears the emphatic bar. Otherwise it
+still logs `noticed: true` and the scores, with `suppressed: "already_failed"`,
+but injects nothing. `PostToolUse` notices are unchanged.
 
 A third question, `failure_kind`, classifies *what kind* of failure it is and
 names the matching recovery:
@@ -431,6 +435,10 @@ repo's own log; the counts grow every session):
     stayed silent, too close 4
     never asked              68  logged before the failure-kind question existed
 ```
+
+New reports also count injected notices and those suppressed because the command
+already failed. `flagged a failure` still counts every classified failure,
+including suppressed ones; `stayed quiet` includes suppressed calls.
 
 Read the bottom half as coverage, not accuracy. `never asked` is records written
 before `failure_kind` existed; `no recovery to name` is the escape hatch working
@@ -842,14 +850,15 @@ allowed, so `test_jev_gate.py` asserts the two agree.
 | --- | --- |
 | Question | type | acts at |
 | --- | --- | --- |
-| `output_shows_failure` | noul | 0.85 — inject a plain reminder |
+| `output_shows_failure` | noul | 0.85 — flag a failure (already-failed calls need a hint or emphatic warning to inject) |
 | `exit_status_misleads` | noul | 0.45 — upgrade to the stronger wording |
 | `failure_kind` | choice | 0.45 **and** 0.20 clear of second — name the recovery |
 
 Fixture margins are wide on the first question: clean output scores ≤0.27, real
 failures ≥0.95. `exit_status_misleads` is the tight one — an ordinary visible test
-failure lands at 0.44 against a 0.45 bar, so that fixture is asserted as a plain
-notice, not an emphatic one. Don't lower the threshold to move it; you'd make
+failure lands at 0.44 against a 0.45 bar, so it is not emphatic. On
+`PostToolUse` it gets a plain notice; on `PostToolUseFailure` it stays quiet
+unless a recovery hint is named. Don't lower the threshold to move it; you'd make
 every test failure emphatic and the wording would stop meaning anything.
 
 `failure_kind` is one `choice` over `transient | missing_dependency |
@@ -862,9 +871,9 @@ over 0.50 already forces second place under 0.50, so a bar of 0.60 makes the
 margin check unreachable — verified by deleting it and watching every fixture still
 pass. So the bar is 0.45 and the margin does the real work. A Docker daemon that is
 down reads equally as a missing dependency (0.49) or a transient outage (0.42); the
-notice fires with no recovery named, which is right, because a human could not call
-that one either. That case is a fixture, so the margin cannot quietly become dead
-code again.
+hook names no recovery, which is right, because a human could not call that one
+either. On `PostToolUseFailure` it stays quiet unless emphatic. That case is a
+fixture, so the margin cannot quietly become dead code again.
 
 Measured cost of one `choice` versus the three `noul` questions it replaced: 4%
 fewer input tokens per call, not the ~40% a question count suggests. Jev prices per

@@ -23,7 +23,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "src", "jev_notice.py")
 
 sys.path.insert(0, os.path.join(REPO, "src"))
-from jev_notice import KINDS  # noqa: E402  -- assert against the real hint text
+from jev_notice import KINDS, MIN_OUTPUT_CHARS  # noqa: E402  -- assert against the real hint text
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fixture_env import fixture_log, hook_env, replay_miss, report, require_key, test_cwd  # noqa: E402
@@ -83,24 +83,24 @@ CASES = [
         "36cca86",
     ),
 
-    # --- must speak up: failure is plainly visible ---
+    # --- already failed: no reminder unless a hint or hidden failure adds value ---
     (
-        "notice: plain test failure",
-        "notice",
+        "quiet: plain test failure already reported",
+        "quiet",
         "npm test -- date.spec.ts",
         1,
         "FAIL src/utils/date.spec.ts\n  formats as en-CA\n\n    expected: '2026-01-02'\n    received: '1/2/2026'\n\nTests: 1 failed, 3 passed, 4 total",
     ),
     (
-        "notice: type error",
-        "notice",
+        "quiet: type error already reported",
+        "quiet",
         "npx tsc --noEmit",
         2,
         "src/usage/index.ts:42:18 - error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.\n\nFound 1 error in src/usage/index.ts:42",
     ),
     (
-        "notice: python traceback",
-        "notice",
+        "quiet: python traceback already reported",
+        "quiet",
         "python3 scripts/usage-report.py",
         1,
         'Traceback (most recent call last):\n  File "scripts/usage-report.py", line 18, in <module>\n    main()\n  File "scripts/usage-report.py", line 11, in main\n    rows = query(month)\nKeyError: \'tenant_id\'',
@@ -116,9 +116,9 @@ CASES = [
     # --- the point of the hook: failure present, skim says success ---
     # Was asserted "emphatic" and scored 0.44-0.46 against EMPHATIC_AT = 0.45 --
     # it passed or failed on the roll. Expectation corrected rather than the
-    # threshold lowered: this output scores the same as "notice: plain test
-    # failure" below, and the reason is sound. `Tests: 2 failed` is right there
-    # in the summary. Exit 0 disagreeing with the text is what the hook catches,
+    # threshold lowered: this output scores like a plain test failure, and the
+    # reason is sound. `Tests: 2 failed` is right there in the summary.
+    # Exit 0 disagreeing with the text is what the hook catches,
     # but nothing here is *hidden*, so a plain notice is the honest verdict.
     # Dropping EMPHATIC_AT to 0.40 to force this would also make every ordinary
     # test failure emphatic, which is the wording losing its meaning.
@@ -189,10 +189,10 @@ CASES = [
     ),
     # A plain assertion failure is needs_code_change, which maps to no hint. It is
     # the case where the agent does need to read the diff and think, and there is
-    # no shortcut worth naming.
+    # no shortcut worth naming. Claude Code already reported the failed exit.
     (
         "kind none: real assertion failure gets no hint",
-        "notice",
+        "quiet",
         "npm test -- date.spec.ts",
         1,
         "FAIL src/utils/date.spec.ts\n  formats as en-CA\n\n    expected: '2026-01-02'\n    received: '1/2/2026'\n\nTests: 1 failed, 3 passed, 4 total",
@@ -205,11 +205,11 @@ CASES = [
     # A dead Docker daemon is a genuine tie: missing_dependency 0.49 against
     # transient 0.42, because it is honestly both. Docker may not be installed, or
     # it may simply not be up yet. Naming either recovery would send the agent
-    # confidently in a direction that is a coin flip, so the notice fires without a
-    # hint. If this case ever starts naming a recovery, the margin check is gone.
+    # confidently in a direction that is a coin flip, so this already-failed call
+    # stays quiet. If it ever starts naming a recovery, the margin check is gone.
     (
         "kind none: honest tie between two kinds stays hintless",
-        "notice",
+        "quiet",
         "docker compose up -d",
         1,
         "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
@@ -250,6 +250,8 @@ def main() -> int:
         label, expected, command, code, output = case[:5]
         want_kind = case[5] if len(case) > 5 else "unchecked"
         payload = real_payload(command, code, output)
+        with open(log_path) as fh:
+            previous = len(fh.readlines())
         proc = subprocess.run(
             [sys.executable, HOOK],
             input=json.dumps(payload),
@@ -274,6 +276,27 @@ def main() -> int:
         ok = actual == expected or (expected == "notice" and actual == "emphatic")
         if replay_miss(proc):
             ok, detail = False, "REPLAY MISS -- no recording; re-record the cassette"
+
+        # Silence must still mean a scored decision, not a crash or a replay
+        # miss. Only the short-output fixture should skip classification.
+        with open(log_path) as fh:
+            records = [json.loads(line) for line in fh.readlines()[previous:]]
+        if len(output.strip()) >= MIN_OUTPUT_CHARS:
+            if len(records) != 1 or "scores" not in records[0]:
+                ok, detail = False, "missing scored audit record"
+            else:
+                record = records[0]
+                suppressed = expected == "quiet" and code != 0
+                if suppressed and not (
+                    record.get("noticed") is True
+                    and record.get("suppressed") == "already_failed"
+                    and record.get("emphatic") is False
+                ):
+                    ok, detail = False, "missing already_failed suppression in audit record"
+                elif not suppressed and "suppressed" in record:
+                    ok, detail = False, "unexpected suppression in audit record"
+        elif records:
+            ok, detail = False, "short output should skip classification"
 
         kind_note = ""
         if want_kind is None:
