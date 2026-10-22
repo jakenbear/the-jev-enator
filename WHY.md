@@ -115,7 +115,7 @@ exit 0
 > [!IMPORTANT]
 > The dangerous failure isn't the loud one. It's the one that **exits 0**.
 
-Real numbers from the same year: **919 command outputs read, 122 failures flagged
+An earlier snapshot from the same year: **919 command outputs read, 122 failures flagged
 (13.3%), and 17 of those marked easy-to-miss** — meaning the exit code or a
 truncating pipe was actively hiding them. What they were:
 
@@ -125,10 +125,12 @@ npm test          exit 0 — tests had already failed           ×3
 cd apps/daemon && RDS_HOST=… python -m pytest                 ×1
 ```
 
-Where it can tell, it also names the fix — needs a code change, missing
-dependency, transient, wrong invocation. Of the 122, **68 predate the kind
-question** and were never asked at all; of the 54 that were asked, 52 got an
-answer and 2 were too close to call, so it said nothing rather than guess.
+Where it can tell, it also names a recovery — install a missing dependency,
+retry a transient failure, or fix the invocation. In the
+[README's later snapshot](README.md#-the-failure-notice), **165 failures were flagged**.
+Of those, **68 predate the kind question** and were never asked at all. Of the
+**97 that were asked**, 52 answered `needs_code_change` (no recovery hint by
+design), 41 named a recovery, and 4 were too close to call.
 
 ---
 
@@ -279,7 +281,7 @@ That's safe, and it's also invisible. Hence the two commands.
 
 ## The cool part: what Jev actually gives you
 
-All four hooks are thin. The interesting machinery is [Jev](https://docs.typesafe.ai),
+All six hooks are thin. The interesting machinery is [Jev](https://docs.typesafe.ai),
 and it's worth understanding *why* it makes this possible when a normal LLM call
 doesn't.
 
@@ -311,11 +313,13 @@ and see whether you were right.
 ### 2. "Too close to call" is a real answer
 
 Because the output is a distribution, a near-tie is detectable. When the failure
-notice can't tell *which* recovery a failure needs, it says nothing instead of
-guessing — a first-class outcome, not a forced pick. In a year of real use it
-declined to name a recovery on **69 of 122** real failures rather than pick one at
-random. That is a high abstention rate, and it is the honest one: a confidently
-wrong "this is transient" sends the agent to retry a bug.
+notice can't tell *which* recovery a failure needs, it names none instead of
+guessing — a first-class outcome, not a forced pick. In the README snapshot
+linked above, **56 of the 97 kind judgments** named no recovery:
+52 were `needs_code_change` by design, and only 4 were too close to call.
+The 68 unasked failures were a coverage gap, not abstentions.
+That distinction matters: a confidently wrong "this is transient" sends the
+agent to retry a bug.
 
 ### 3. You teach it with examples, not a prompt
 
@@ -396,7 +400,7 @@ cent.
 ---
 
 <p align="center">
-  <b>4 hooks · Python stdlib only · ~350ms · fails open</b><br>
+  <b>6 hooks · Python stdlib only · ~350ms · fails open</b><br>
   <sub>Numbers on this page come from one real audit log. Run <code>./report.sh</code> to see yours.</sub>
 </p>
 
